@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TandemKV — Off-Critical-Path Index Maintenance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0f11;
+  --surface: #16181c;
+  --surface2: #1e2026;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #e8e9eb;
+  --muted: #6b7280;
+  --accent: #7c6fec;
+  --accent2: #4fc4a0;
+  --accent3: #e07b54;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  border-bottom: 1px solid var(--border);
+  padding: 2.5rem 0 2rem;
+  margin-bottom: 0;
+}
+.header-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+.venue {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: .75rem;
+}
+.title {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 500;
+  line-height: 1.25;
+  color: #fff;
+  margin-bottom: .5rem;
+}
+.subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  font-family: var(--mono);
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  text-decoration: none;
+  transition: border-color .15s, color .15s;
+}
+.badge:hover { border-color: var(--accent); color: var(--accent); }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Layout */
+.layout {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 0 2.5rem;
+  align-items: start;
+}
+
+/* Sidebar nav */
+.sidebar {
+  position: sticky;
+  top: 2rem;
+  padding-top: .25rem;
+}
+.nav-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: .75rem;
+  padding-left: 10px;
+}
+.nav-link {
+  display: block;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+}
+.nav-link:hover { color: var(--text); }
+.nav-link.active { color: var(--accent); border-left-color: var(--accent); }
+
+/* Main content */
+.main { min-width: 0; }
+.section { display: none; animation: fadein .2s ease; }
+.section.active { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Section heading */
+.sec-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: .35rem;
+}
+.sec-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  line-height: 1.65;
+}
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: .75rem;
+}
+.card-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: .5rem;
+  font-family: var(--mono);
+  letter-spacing: .02em;
+}
+.card-body { font-size: 13px; color: #9ca3af; line-height: 1.65; }
+
+/* Contribution rows */
+.contrib {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: .65rem;
+}
+.contrib-num {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(124,111,236,.15);
+  border: 1px solid rgba(124,111,236,.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.contrib-text { font-size: 13px; color: #9ca3af; line-height: 1.6; }
+
+/* Tags */
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin: 2px 3px 2px 0;
+}
+.tag-p { background: rgba(124,111,236,.12); color: #a89ff5; border: 1px solid rgba(124,111,236,.2); }
+.tag-t { background: rgba(79,196,160,.1); color: #4fc4a0; border: 1px solid rgba(79,196,160,.2); }
+.tag-o { background: rgba(224,123,84,.1); color: #e07b54; border: 1px solid rgba(224,123,84,.2); }
+.tag-g { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid var(--border); }
+
+/* Term list */
+.term-row {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.term-row:last-child { border: none; }
+.term-key {
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 52px;
+  flex-shrink: 0;
+}
+.term-val { font-size: 12px; color: #9ca3af; }
+
+/* Flow */
+.flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: .6rem;
+}
+.fstep {
+  background: rgba(124,111,236,.1);
+  border: 1px solid rgba(124,111,236,.2);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: #a89ff5;
+}
+.farr { color: var(--muted); font-size: 12px; }
+
+/* Two column */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
+
+/* Knob card */
+.knob {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.knob-title {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: .4rem;
+}
+.knob-body { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+.knob-formula {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent2);
+  background: rgba(79,196,160,.07);
+  border: 1px solid rgba(79,196,160,.15);
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin-top: .5rem;
+  display: block;
+}
+
+/* API table */
+.api-row {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.api-row:last-child { border: none; }
+.api-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #6eb5f5;
+  min-width: 140px;
+  flex-shrink: 0;
+}
+.api-desc { font-size: 12px; color: #9ca3af; }
+
+/* Code block */
+.code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .75rem 1rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #c9d1d9;
+  line-height: 1.65;
+  margin-bottom: .75rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Stats */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: .75rem;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .7rem .9rem;
+}
+.stat-label { font-size: 10px; font-family: var(--mono); color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .05em; }
+.stat-val { font-size: 18px; font-weight: 500; color: #fff; }
+
+/* Recovery mode cards */
+.mode {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  border-top: 2px solid;
+}
+.mode-instant { border-top-color: var(--accent2); }
+.mode-replay { border-top-color: #6eb5f5; }
+.mode-title { font-family: var(--mono); font-size: 12px; font-weight: 500; margin-bottom: .35rem; }
+.mode-instant .mode-title { color: var(--accent2); }
+.mode-replay .mode-title { color: #6eb5f5; }
+.mode-body { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+
+/* Baseline comparison */
+.baseline-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.baseline-row:last-child { border: none; }
+.baseline-name { font-family: var(--mono); font-size: 12px; color: var(--accent3); }
+.baseline-desc { font-size: 12px; color: #9ca3af; line-height: 1.55; }
+
+/* Ablation table */
+.ablation-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.ablation-row:last-child { border: none; }
+.ablation-key { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ablation-desc { font-size: 12px; color: #9ca3af; }
+.ablation-result { font-family: var(--mono); font-size: 11px; color: var(--accent2); white-space: nowrap; }
+
+/* Footer cta */
+.cta {
+  margin-top: 1.25rem;
+  padding: .75rem 1rem;
+  background: rgba(124,111,236,.07);
+  border: 1px solid rgba(124,111,236,.18);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+.cta a { color: var(--accent); text-decoration: none; }
+.cta a:hover { text-decoration: underline; }
+
+/* Invariant rows */
+.inv-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: .5rem;
+}
+.inv-num {
+  min-width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(79,196,160,.12);
+  border: 1px solid rgba(79,196,160,.25);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; color: var(--accent2);
+  flex-shrink: 0; margin-top: 1px;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 1.5rem; }
+  .nav-label { display: none; }
+  .nav-link { border-left: none; border-bottom: 2px solid transparent; padding: 4px 8px; }
+  .nav-link.active { border-bottom-color: var(--accent); border-left: none; }
+  .two { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="venue">SIGMOD '27 &nbsp;·&nbsp; Systems Research</div>
+    <h1 class="title">TandemKV: Off-Critical-Path Index Maintenance<br>for Durable DRAM–NVM Key-Value Stores</h1>
+    <div class="subtitle">Anonymous Author(s) &nbsp;·&nbsp; 2026</div>
+    <div class="badges">
+      <a href="https://github.com/anon-user-KV/TandemKV" class="badge" target="_blank">
+        <span class="badge-dot"></span> GitHub
+      </a>
+      <span class="badge"><span class="badge-dot" style="background:var(--accent2)"></span> Intel Optane PMEM</span>
+      <span class="badge"><span class="badge-dot" style="background:#6eb5f5"></span> C++17 · ~11K LoC</span>
+      <span class="badge"><span class="badge-dot" style="background:var(--accent3)"></span> YCSB evaluated</span>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="nav-label">Sections</div>
+    <button class="nav-link active" onclick="show('overview', this)">Overview</button>
+    <!-- <button class="nav-link" onclick="show('arch', this)">Architecture</button>
+    <button class="nav-link" onclick="show('smo', this)">SMO policies</button>
+    <button class="nav-link" onclick="show('params', this)">Control params</button>-->
+    <button class="nav-link" onclick="show('recovery', this)">Recovery</button>
+    <!--<button class="nav-link" onclick="show('eval', this)">Evaluation</button>
+    <button class="nav-link" onclick="show('impl', this)">Implementation</button> -->
+  </aside>
+
+  <main class="main">
+
+    <!-- OVERVIEW -->
+    <div id="overview" class="section active">
+      <div class="sec-title">What is TandemKV?</div>
+      <div class="sec-desc">A write-efficient KV engine for heterogeneous DRAM–NVM memory that decouples index maintenance from durability. Structure modification operations (SMOs) execute on the DRAM main index first; durable reconciliation with the PMEM shadow index is a separate, runtime-controlled decision — governed by explicit thresholds rather than triggered on every write.</div>
+
+      <div class="card">
+        <div class="card-title">Core contributions</div>
+        <div style="margin-top:6px;">
+          <div class="contrib"><span class="contrib-num">1</span><span class="contrib-text">New control boundary for durable indexing — SMOs need not be synchronous persistence tasks; structural durability is controlled independently by runtime signals</span></div>
+          <div class="contrib"><span class="contrib-num">2</span><span class="contrib-text">Dual-index architecture — DRAM main index for foreground access + PMEM shadow index as durable recovery image, with symmetric offset-based addressing for crash-safe reuse</span></div>
+          <div class="contrib"><span class="contrib-num">3</span><span class="contrib-text">Adaptive SMO policy — deferred SMOs amortize write cost under random inserts; speculative SMOs (SGPs) provision routing capacity proactively under skewed workloads</span></div>
+          <div class="contrib"><span class="contrib-num">4</span><span class="contrib-text">Prototype on Intel Optane PMEM evaluated against Prism, FluidKV, ListDB, DPTree across the full YCSB suite under both uniform and Zipfian distributions</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Key terminology</div>
+        <div class="term-row"><span class="term-key tag tag-p">SMO</span><span class="term-val">Structure modification operation — node split, merge, or guidepost activation</span></div>
+        <div class="term-row"><span class="term-key tag tag-p">iNode</span><span class="term-val">Internal routing node in the DRAM main index</span></div>
+        <div class="term-row"><span class="term-key tag tag-p">vNode</span><span class="term-val">Fixed-size append-only value node stored on PMEM</span></div>
+        <div class="term-row"><span class="term-key tag tag-t">GP</span><span class="term-val">Guidepost — stable routing entry partitioning the key space within an iNode</span></div>
+        <div class="term-row"><span class="term-key tag tag-t">SGP</span><span class="term-val">Speculative guidepost — dormant placeholder pre-filled with predicted split keys</span></div>
+        <div class="term-row"><span class="term-key tag tag-o">σ</span><span class="term-val">Path-stability threshold — controls when deferred rebalancing fires in DRAM</span></div>
+        <div class="term-row"><span class="term-key tag tag-o">δ</span><span class="term-val">Shadow-divergence threshold — controls when the PMEM shadow index must be checkpointed</span></div>
+        <div class="term-row"><span class="term-key tag tag-o">m</span><span class="term-val">Noise-rejection margin — gates SGP allocation on predicted insert pressure</span></div>
+      </div>
+    </div>
+
+        <!-- RECOVERY -->
+    <div id="recovery" class="section">
+      <div class="sec-title">Recovery</div>
+      <div class="sec-desc">TandemKV prioritizes immediate availability over exhaustive reconstruction. The recovered index is structurally stale but semantically complete — all committed records remain reachable.</div>
+
+      <div class="card">
+        <div class="card-title">Recovery invariants</div>
+        <div class="inv-row" style="margin-top:4px;"><span class="inv-num">1</span><span class="card-body">Routing correctness — all traversal paths remain valid; every committed record is reachable from the recovered index</span></div>
+        <div class="inv-row"><span class="inv-num">2</span><span class="card-body">Bounded search-path inflation — post-crash search depth exceeds the last checkpoint depth by at most δ</span></div>
+      </div>
+
+      <div class="two">
+        <div class="mode mode-instant">
+          <div class="mode-title">Stale-shadow mode (default)</div>
+          <div class="mode-body">Memory-maps the last checkpoint and immediately begins serving requests. SMOs recorded in the redo log after the last checkpoint are absent from the recovered index.<br><br>Recovery time: ~0s. Post-crash search initially degraded by at most δ.<br><br>When adaptive replay is enabled, a background thread monitors post-restart write activity. If writes are flowing, the index self-heals through splits and rebalancing. If no writes are detected for a configurable quiet period, the thread lazily replays the WAL in bounded chunks, refreshing the DRAM index incrementally until the log is drained and the thread exits.</div>
+        </div>
+        <div class="mode mode-replay">
+          <div class="mode-title">Log-replay mode</div>
+          <div class="mode-body">Before serving requests, replays the persistent SMO redo log to reconstruct the index state at the crash point. Longer restart time, better post-crash search quality.<br><br>Recovery time: 0.05s (δ≈1.01) to 1.65s (δ≈10.0). Preferred when post-crash latency matters more than restart time.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Recovery procedure (stale-shadow)</div>
+        <div class="code">// recoveryManager.cpp — RecoveryManager::recoveryOperation()
+FUNCTION recoveryOperation()
+    superNode = pmemInodePool[MAX_NODES - 1]       // persistent metadata sentinel
+    IF superNode.next != 0:
+        memcpyToDRAM(dramPool, pmemPool, sizeof(Inode) * last_index)
+        FOR EACH inode with odd seqlock version:   // mid-write at crash time
+            bump version to next even value        // unblock reader spin-waits
+    RETURN superNode.level
+END FUNCTION</div>
+        <div class="flow" style="margin-top:6px;">
+          <span class="fstep">re-map PMEM pool</span><span class="farr">→</span>
+          <span class="fstep">copy shadow image → DRAM</span><span class="farr">→</span>
+          <span class="fstep">fix odd seqlocks</span><span class="farr">→</span>
+          <span class="fstep">reload runtime metadata</span><span class="farr">→</span>
+          <span class="fstep">serve requests</span>
+        </div>
+        <div class="card-body">No pointer swizzling, no address translation, no index rebuild. Lightweight runtime metadata (skiplist height, node-allocation counters) is flushed periodically to PMEM and reloaded on restart via the <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">SuperNode</code> sentinel at <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">pmemInodePool[MAX_NODES - 1]</code>.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">WAL ring buffer</div>
+        <div class="card-body" style="margin-top:4px;">The SMO redo log is a persistent ring buffer on NVM managed by four atomic cursors:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_consumed_start</span><span class="api-desc">Oldest entry not yet applied to pmem inodes — the replay frontier</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_alloc_end</span><span class="api-desc">Allocation frontier — may contain partially written entries</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_produced_end</span><span class="api-desc">Fully written entries, ready for CLWB</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_durable_end</span><span class="api-desc">Flushed and fence-ordered — safe to replay after crash</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px;">Cursor positions are persisted in a <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">CkptLogPersistMeta</code> struct on NVM, guarded by a magic constant to distinguish valid recovery state from uninitialized memory. Two record types: <span class="tag tag-t">FULL</span> overwrites an entire pmem inode, <span class="tag tag-p">DELTA</span> patches individual GP slots in-place.</div>
+        <div class="code" style="margin-top:8px;">// ckpt_log.cpp — replayLog()
+FUNCTION replayLog(pmemInodePool)
+    consumed = a_consumed_start
+    durable  = a_durable_end
+    IF consumed >= durable: RETURN          // nothing to replay
+
+    FOR EACH record IN WAL[consumed .. durable):
+        IF record.type == FULL:
+            overwrite pmemInodePool[record.inode_id]  // full snapshot
+        ELSE IF record.type == DELTA:
+            FOR EACH slot IN record.entries:
+                patch pmemInodePool[record.inode_id].gp[slot]
+    advance a_consumed_start
+END FUNCTION</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Adaptive replay (stale-shadow extension)</div>
+        <div class="card-body" style="margin-top:4px;">Writes naturally converge the index: each insert may trigger splits, GP creation, and rebalancing that overwrite the stale post-crash routing state. WAL replay is only necessary when writes stop flowing and the degraded DRAM index remains stuck.</div>
+        <div class="code" style="margin-top:8px;">// tandemIndex.cpp — adaptiveReplayThreadExec()
+FUNCTION adaptiveReplayThread()
+    quiet_epochs = 0
+    WHILE WAL has pending entries:
+        sleep(SAMPLE_WINDOW)
+        writes = atomic_exchange(op_write_count, 0)
+        IF writes > 0:
+            quiet_epochs = 0            // index self-healing via live traffic
+            CONTINUE
+        quiet_epochs++
+        IF quiet_epochs < IDLE_EPOCHS:
+            CONTINUE
+        // No writes for IDLE_EPOCHS — index is stuck, replay a chunk
+        lazyReplayStep(WAL, BATCH_BYTES)
+        memcpyToDRAM(dramPool, pmemPool)  // refresh DRAM so reads benefit
+        yield(LAZY_YIELD_US)
+    THREAD EXITS                          // WAL drained — no residual polling
+END FUNCTION</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">SAMPLE_WINDOW_MS = 500</span><span class="api-desc">Epoch length for write-activity sampling</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">IDLE_EPOCHS = 6</span><span class="api-desc">Consecutive quiet epochs before lazy replay (default: 3 s)</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">LAZY_BATCH_BYTES = 256 KB</span><span class="api-desc">Maximum bytes replayed per step</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">LAZY_YIELD_US = 200</span><span class="api-desc">Inter-batch yield to limit foreground interference</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Post-crash convergence</div>
+        <div class="card-body">The same path-stability metrics used during normal execution continue to fire after recovery. Structural gaps from missing SMOs are repaired incrementally as live traffic triggers reactive and proactive SMOs — without any recovery-specific restructuring. Under typical deployments (δ = 1.1–1.5), the latency overhead is small and often negligible under read-dominated workloads. With adaptive replay enabled, write-active workloads self-heal while read-only workloads converge via background WAL drain within seconds.</div>
+      </div>
+    </div>
+
+
+  </main>
+</div>
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
