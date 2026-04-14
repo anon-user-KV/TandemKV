@@ -427,8 +427,8 @@ body {
   <aside class="sidebar">
     <div class="nav-label">Sections</div>
     <button class="nav-link active" onclick="show('overview', this)">Overview</button>
-    <!-- <button class="nav-link" onclick="show('arch', this)">Architecture</button>
-    <button class="nav-link" onclick="show('smo', this)">SMO policies</button>
+    <button class="nav-link" onclick="show('arch', this)">Architecture</button>
+    <!-- <button class="nav-link" onclick="show('smo', this)">SMO policies</button>
     <button class="nav-link" onclick="show('params', this)">Control params</button>-->
     <button class="nav-link" onclick="show('recovery', this)">Recovery</button>
     <!--<button class="nav-link" onclick="show('eval', this)">Evaluation</button>
@@ -464,6 +464,46 @@ body {
         <div class="term-row"><span class="term-key tag tag-o">m</span><span class="term-val">Noise-rejection margin — gates SGP allocation on predicted insert pressure</span></div>
       </div>
     </div>
+
+        <!-- ARCHITECTURE -->
+<div id="arch" class="section">
+  <div class="sec-title">Architecture</div>
+  <div class="sec-desc">TandemKV splits responsibility across a DRAM index that serves every foreground operation and a PMEM image that is updated only by background propagation. The design goal is visible in what does <em>not</em> happen on the critical path: no PMEM index writes, no fences, no pointer fix-up, no synchronous checkpoint.</div>
+
+  <figure style="margin:0 0 1.25rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem;">
+    <img src="figures/fig1_architecture.png" alt="TandemKV system architecture: DRAM pool with main index and deferred SMOs; identical offset-based PMEM mirror plus vNode data pool; iNode with eager GP and lazy SGP routing slots; index architecture with hotspot monitoring, probabilistic inter-node skip, and speculative/proactive SMO policies." style="width:100%; height:auto; display:block; border-radius:4px;">
+    <figcaption style="font-size:11px; color:var(--muted); font-family:var(--mono); margin-top:.6rem; text-align:center;">Figure 1 — TandemKV system architecture.</figcaption>
+  </figure>
+  
+<div class="card">
+  <div class="two">
+    <div class="knob">
+      <div class="knob-title" style="color:#6eb5f5;">DRAM-resident main index</div>
+      <div class="knob-body">Skiplist-style traversal combined with B⁺-tree-inspired wide nodes —  Serves all foreground reads and writes. Absorbs all SMOs immediately. Holds iNodes (routing) with references to PMEM vNodes (data). Lock-free traversal with targeted iNode/vNode caching.</div>
+    </div>
+    <div class="knob">
+      <div class="knob-title" style="color:var(--accent2);">PMEM-resident shadow index</div>
+      <div class="knob-body">An <em>identical offset-based mirror</em> of the DRAM iNode pool acts as the durable restart image with every cross-object reference encoded as a pool index rather than a pointer. Updated only at async checkpoints; can be memory-mapped and reused with no swizzling.</div>
+    </div>
+  </div>
+
+      <div class="card">
+    <div class="card-title" style="color:var(--accent3);">Value storage — persistent vNode pool</div>
+    <div class="card-body" style="margin-top:4px;">
+    A separate <em>data pool</em> of append-only vNodes holds the actual records (separate from the index); writes land in unordered arrays via non-temporal stores. Bloom filters and per-entry fingerprints compensate for the unordered layout. An adaptive size-bounded DRAM Bloom-filter cache promotes filters for hot vNodes in the background.
+  </div>
+</div>
+</div>
+
+  <div class="card">
+    <div class="card-title">iNode [dual-guidepost abstraction]</div>
+    <div class="card-body" style="margin-top:4px;">
+      Each iNode maintains two kinds of routing entries that separate stable state from speculative expansion:<br><br> 
+      <span class="tag tag-t">GP</span> <em>Lazy</em> path: stable routing entries created on-demand (real routing decisions), delta-logged, durable across checkpoints.<br><br>
+      <span class="tag tag-p">SGP</span> <em>Eager</em> path: dormant placeholders pre-filled with predicted split keys, gated by an atomic visibility bitmap (zero lookup overhead while inactive). When an incoming split validates a predicted key, the SGP slot is <em>linked</em> — a single atomic fetch-or publishes it, replacing what would otherwise be a reactive GP creation. Predicted slots that aren't linked are discarded silently at next reorganization.
+    </div>
+  </div>
+</div>
 
         <!-- RECOVERY -->
     <div id="recovery" class="section">
