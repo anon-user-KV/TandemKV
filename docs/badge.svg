@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="60" viewBox="0 0 420 60">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1">
+      <stop offset="0"   stop-color="#6eb5f5"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1"   stop-color="#6eb5f5"/>
+      <animate attributeName="x1" values="-1;1" dur="2.5s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values="0;2"  dur="2.5s" repeatCount="indefinite"/>
+    </linearGradient>
+  </defs>
+  <rect width="420" height="60" rx="30" fill="#1f3a5f"/>
+  <rect width="420" height="60" rx="30" fill="url(#g)" opacity="0.9"/>
+  <text x="210" y="38" text-anchor="middle"
+        font-family="ui-sans-serif,system-ui" font-size="20" font-weight="700" fill="#fff">
+    📖  Interactive Documentation  →
+  </text>
+</svg>
