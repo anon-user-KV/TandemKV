@@ -17,4 +17,4 @@ Compile-time flags (passed as `make VAR=1`): `ENABLE_SGP`, `ENABLE_COEFF_ONE`,
 `ENABLE_IMMEDIATE_FLUSH`, `ENABLE_IMMEDIATE_RECLAIM`, `ENABLE_SPLITPATH_STATS`.
 
 ## Run a single workload
-./project <workload> <dist> <threads> <pmem_dir> [--insert-only]
+./project <workload>  <dist>  <threads> <pmem_dir> [--insert-only]
