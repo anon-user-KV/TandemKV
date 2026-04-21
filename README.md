@@ -21,10 +21,13 @@ The binary reads pre-generated YCSB trace files from the directory pointed to by
 ```cd ycsb_generator; make -j${n_proc}```
 
 generate 50M-key load + txns{a..f} for {zipf, unif}; outputs `*.trace` in `0.99/`
+
 ```./generator.sh```
 
 or generate a single workload manually:
+
 ```./ycsb_generator workload:a-f dist:zipf|unif <num_items>```
+
 ```./ycsb_generator a zipf 5000000```
 
 Edit `ITEM_NUM` in `generator.sh` (default 100M) for the full-paper scale, or use a smaller value (e.g. 5M) for quick smoke tests. Move the resulting `*.trace` files into one directory and point `TANDEMKV_WORKLOAD_DIR` at it.
@@ -32,7 +35,8 @@ Edit `ITEM_NUM` in `generator.sh` (default 100M) for the full-paper scale, or us
 Expected contents of `$TANDEMKV_WORKLOAD_DIR`: `load.trace`, `txns{a,b,c,d,e,f}_{zipf,unif}.trace`.
 
 ## Run a single workload
-export TANDEMKV_WORKLOAD_DIR=/path/to/workloads
+```export TANDEMKV_WORKLOAD_DIR=/path/to/workloads```
+
 ```./project <workload>  <dist>  <threads> <pmem_dir> [--insert-only]```
 
 
