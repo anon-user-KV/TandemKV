@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TandemKV — Off-Critical-Path Index Maintenance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0f11;
+  --surface: #16181c;
+  --surface2: #1e2026;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #e8e9eb;
+  --muted: #6b7280;
+  --accent: #7c6fec;
+  --accent2: #4fc4a0;
+  --accent3: #e07b54;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17.5px;
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  border-bottom: 1px solid var(--border);
+  padding: 2.5rem 0 2rem;
+  margin-bottom: 0;
+}
+.header-inner {
+  max-width: min(95vw, 1500px);
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+.venue {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--accent);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: .75rem;
+}
+.title {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 500;
+  line-height: 1.25;
+  color: #fff;
+  margin-bottom: .5rem;
+}
+.subtitle {
+  font-size: 15px;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  font-family: var(--mono);
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 15px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  text-decoration: none;
+  transition: border-color .15s, color .15s;
+}
+.badge:hover { border-color: var(--accent); color: var(--accent); }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Layout */
+.layout {
+  max-width: min(95vw, 1500px);
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 0 2.5rem;
+  align-items: start;
+}
+
+/* Sidebar nav */
+.sidebar {
+  position: sticky;
+  top: 2rem;
+  padding-top: .25rem;
+}
+.nav-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: .75rem;
+  padding-left: 10px;
+}
+.nav-link {
+  display: block;
+  padding: 8px 12px;
+  font-size: 15px;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+}
+.nav-link:hover { color: var(--text); }
+.nav-link.active { color: var(--accent); border-left-color: var(--accent); }
+
+/* Main content */
+.main { min-width: 0; }
+.section { display: none; animation: fadein .2s ease; }
+.section.active { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Section heading */
+.sec-title {
+  font-size: 26px;
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: .5rem;
+}
+.sec-desc {
+  font-size: 17px;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  line-height: 1.7;
+}
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: .75rem;
+}
+.card-title {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: .6rem;
+  font-family: var(--mono);
+  letter-spacing: .02em;
+}
+.card-body { font-size: 16.5px; color: #9ca3af; line-height: 1.75; }
+
+/* Compact comparison table */
+.compact-compare {
+  font-size: 12.5px !important;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  table-layout: fixed;
+  white-space: nowrap;
+}
+.compact-compare th {
+  padding: 5px 7px !important;
+}
+.compact-compare td {
+  padding: 4px 7px !important;
+}
+.compact-compare .row-highlight td {
+  padding: 5px 7px !important;
+  white-space: nowrap !important;
+}
+
+/* Contribution rows */
+.contrib {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: .65rem;
+}
+.contrib-num {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(124,111,236,.15);
+  border: 1px solid rgba(124,111,236,.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.contrib-text { font-size: 15px; color: #9ca3af; line-height: 1.6; }
+
+/* Tags */
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 15px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin: 2px 3px 2px 0;
+}
+.tag-p { background: rgba(124,111,236,.12); color: #a89ff5; border: 1px solid rgba(124,111,236,.2); }
+.tag-t { background: rgba(79,196,160,.1); color: #4fc4a0; border: 1px solid rgba(79,196,160,.2); }
+.tag-o { background: rgba(224,123,84,.1); color: #e07b54; border: 1px solid rgba(224,123,84,.2); }
+.tag-g { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid var(--border); }
+
+/* Term list */
+.term-row {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.term-row:last-child { border: none; }
+.term-key {
+  font-family: var(--mono);
+  font-size: 14px;
+  min-width: 52px;
+  flex-shrink: 0;
+}
+.term-val { font-size: 14px; color: #9ca3af; }
+
+/* Flow */
+.flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: .6rem;
+}
+.fstep {
+  background: rgba(124,111,236,.1);
+  border: 1px solid rgba(124,111,236,.2);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 14px;
+  font-family: var(--mono);
+  color: #a89ff5;
+}
+.farr { color: var(--muted); font-size: 14px; }
+
+/* Two column */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
+
+/* Knob card */
+.knob {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.knob-title {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: .45rem;
+}
+.knob-body { font-size: 15.5px; color: #9ca3af; line-height: 1.7; }
+.knob-formula {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--accent2);
+  background: rgba(79,196,160,.07);
+  border: 1px solid rgba(79,196,160,.15);
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin-top: .5rem;
+  display: block;
+}
+
+/* API table */
+.api-row {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.api-row:last-child { border: none; }
+.api-name {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: #6eb5f5;
+  min-width: 140px;
+  flex-shrink: 0;
+}
+.api-desc { font-size: 14px; color: #9ca3af; }
+
+/* Code block */
+.code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .75rem 1rem;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: #c9d1d9;
+  line-height: 1.65;
+  margin-bottom: .75rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Stats */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: .75rem;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .7rem .9rem;
+}
+.stat-label { font-size: 12px; font-family: var(--mono); color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .05em; }
+.stat-val { font-size: 18px; font-weight: 500; color: #fff; }
+
+/* Recovery mode cards */
+.mode {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  border-top: 2px solid;
+}
+.mode-instant { border-top-color: var(--accent2); }
+.mode-replay { border-top-color: #6eb5f5; }
+.mode-title { font-family: var(--mono); font-size: 17px; font-weight: 600; margin-bottom: .45rem; }
+.mode-instant .mode-title { color: var(--accent2); }
+.mode-replay .mode-title { color: #6eb5f5; }
+.mode-body { font-size: 15.5px; color: #9ca3af; line-height: 1.7; }
+
+/* Baseline comparison */
+.baseline-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.baseline-row:last-child { border: none; }
+.baseline-name { font-family: var(--mono); font-size: 14px; color: var(--accent3); }
+.baseline-desc { font-size: 14px; color: #9ca3af; line-height: 1.55; }
+
+/* Ablation table */
+.ablation-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.ablation-row:last-child { border: none; }
+.ablation-key { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+.ablation-desc { font-size: 14px; color: #9ca3af; }
+.ablation-result { font-family: var(--mono); font-size: 15px; color: var(--accent2); white-space: nowrap; }
+
+/* Footer cta */
+.cta {
+  margin-top: 1.25rem;
+  padding: .75rem 1rem;
+  background: rgba(124,111,236,.07);
+  border: 1px solid rgba(124,111,236,.18);
+  border-radius: 6px;
+  font-size: 14px;
+  color: #9ca3af;
+}
+.cta a { color: var(--accent); text-decoration: none; }
+.cta a:hover { text-decoration: underline; }
+
+/* Invariant rows */
+.inv-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: .5rem;
+}
+.inv-num {
+  min-width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(79,196,160,.12);
+  border: 1px solid rgba(79,196,160,.25);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 15px; color: var(--accent2);
+  flex-shrink: 0; margin-top: 1px;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 1.5rem; }
+  .nav-label { display: none; }
+  .nav-link { border-left: none; border-bottom: 2px solid transparent; padding: 4px 8px; }
+  .nav-link.active { border-bottom-color: var(--accent); border-left: none; }
+  .two { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="venue">SIGMOD '27 &nbsp;·&nbsp; Systems Research</div>
+    <h1 class="title">TandemKV: Off-Critical-Path Index Maintenance<br>for Durable DRAM–NVM Key-Value Stores</h1>
+    <div class="subtitle">Anonymous Author(s) &nbsp;·&nbsp; 2026</div>
+    <div class="badges">
+      <a href="https://github.com/anon-user-KV/TandemKV" class="badge" target="_blank">
+        <span class="badge-dot"></span> GitHub
+      </a>
+      <span class="badge"><span class="badge-dot" style="background:var(--accent2)"></span> Intel Optane PMEM</span>
+      <span class="badge"><span class="badge-dot" style="background:#6eb5f5"></span> C++17 · ~11K LoC</span>
+      <span class="badge"><span class="badge-dot" style="background:var(--accent3)"></span> YCSB evaluated</span>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="nav-label">Sections</div>
+    <button class="nav-link active" onclick="show('overview', this)">Overview</button>
+    <button class="nav-link" onclick="show('arch', this)">Architecture</button>
+    <button class="nav-link" onclick="show('smo', this)">SMO policies</button>
+    <button class="nav-link" onclick="show('spec', this)">Speculation</button>
+    <button class="nav-link" onclick="show('params', this)">Control params</button>
+    <button class="nav-link" onclick="show('recovery', this)">Recovery</button>
+    <button class="nav-link" onclick="show('eval', this)">Evaluation</button>
+    <button class="nav-link" onclick="show('impl', this)">Implementation</button>
+  </aside>
+
+  <main class="main">
+
+    <!-- OVERVIEW -->
+    <div id="overview" class="section active">
+      <div class="sec-title">What is TandemKV?</div>
+      <div class="sec-desc">A write-efficient KV engine for heterogeneous DRAM–NVM memory that decouples index maintenance from durability. Structure modification operations (SMOs) execute on the DRAM main index first; durable reconciliation with the PMEM shadow index is a separate, runtime-controlled decision — governed by explicit thresholds rather than triggered on every write.</div>
+      
+      <div class="card">
+        <div class="card-title">Core contributions</div>
+        <div style="margin-top:6px;">
+          <div class="contrib"><span class="contrib-num">1</span><span class="contrib-text">New control boundary for durable indexing — SMOs need not be synchronous persistence tasks; structural durability is controlled independently by runtime signals</span></div>
+          <div class="contrib"><span class="contrib-num">2</span><span class="contrib-text">Dual-index architecture — DRAM main index for foreground access + PMEM shadow index as durable recovery image, with symmetric offset-based addressing for crash-safe reuse</span></div>
+          <div class="contrib"><span class="contrib-num">3</span><span class="contrib-text">Adaptive SMO policy — deferred SMOs amortize write cost under random inserts; speculative SMOs (SGPs) provision routing capacity proactively under skewed workloads</span></div>
+          <div class="contrib"><span class="contrib-num">4</span><span class="contrib-text">Prototype on Intel Optane PMEM evaluated against Prism, FluidKV, ListDB, DPTree across the full YCSB suite under both uniform and Zipfian distributions</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Motivation</div>
+        <div class="card-body" style="margin-top:4px;">
+          Eager index logging puts every structural update — split, merge, guidepost activation — on the foreground path as a synchronous <code style="font-family:var(--mono);font-size:14px;">CLWB+SFENCE</code>. The bottleneck isn't NVM bandwidth; it's <strong style="font-weight:500;">the assumption that every structural refinement must be made durable immediately</strong>. Data correctness and index search-quality have different persistence requirements: committed values must be atomically durable, but the index only needs to preserve <em>reachability</em> with bounded post-crash search degradation — so the recovery index can safely lag behind the runtime index in a controlled manner.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Design principles</div>
+         <!--<div class="card-body" style="margin-top:4px;">Four principles guide every architectural decision in TandemKV from how SMOs are scheduled, to how the shadow index is addressed, to which signals trigger persistence. </div>-->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:.75rem; margin-top:10px;">
+          <div class="knob">
+            <div class="knob-title" style="color:#6eb5f5;">① Decouple search from durability</div>
+            <div class="knob-body">SMOs proceed on the volatile structure without waiting for persistence. Durable propagation is a separate, runtime-controlled decision driven by search-quality and divergence signals — not a per-update obligation.</div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent2);">② Crash-stable addressing</div>
+            <div class="knob-body">Symmetric virtual-address regions in DRAM and PMEM, with every internal reference encoded as a pool-relative offset rather than an absolute pointer. Restart re-maps the region and reuses the persisted image with zero pointer fix-up.</div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent3);">③ Adaptive, I/O-efficient structure</div>
+            <div class="knob-body">Skiplist-style navigation for cheap, lock-free reorganization, combined with B⁺-tree-style wide nodes for spatial locality and bounded search depth. Per-node guideposts activate incrementally so structural pressure is absorbed without full splits.</div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent4, #d2a8ff);">④ Recovery-aware adaptive SMOs</div>
+            <div class="knob-body">Two complementary policies shape the SMO mix to the workload: <em>deferred</em> SMOs amortize structural writes under random inserts; <em>speculative</em> SMOs pre-provision routing capacity under skew. Both keep reorganization off the persistence-critical path.</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Where TandemKV sits in the design space</div>
+        <div class="card-body" style="margin-top:4px;">
+          Prior durable indexes either trigger SMOs on capacity / model-error signals and treat persistence as orthogonal, or persist eagerly and pay the cost on every insert's critical path. TandemKV is the only design that pairs <em>speculative</em> SMOs with <em>persistence-aware</em> triggers — restructuring fires on the signals that matter for durable systems, and happens before the workload forces a synchronous split.
+        </div>
+        <div style="margin-top:12px; overflow-x:auto;">
+          <table class="compact-compare" style="width:100%; border-collapse:collapse; font-size:14px; font-family:var(--mono); color:#c9d1d9;">
+            <colgroup>
+              <col style="width:15%;">
+              <col style="width:23%;">
+              <col style="width:22%;">
+              <col style="width:18%;">
+              <col style="width:22%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#161b22; border-bottom:1px solid var(--border2);">
+                <th style="text-align:left; padding:8px 10px; font-weight:500; color:var(--muted);">Index</th>
+                <th style="text-align:left; padding:8px 10px; font-weight:500; color:var(--muted);">Instant recovery</th>
+                <th style="text-align:left; padding:8px 10px; font-weight:500; color:var(--muted);">SMO trigger</th>
+                <th style="text-align:left; padding:8px 10px; font-weight:500; color:var(--muted);">Speculative SMO</th>
+                <th style="text-align:left; padding:8px 10px; font-weight:500; color:var(--muted);">Persist-aware</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">B-tree</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Capacity threshold</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">Bw-tree</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Capacity threshold</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">ALEX</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Model error</td>
+                <td style="padding:7px 10px; color:#d29922;">Preemptive split</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">BLI</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Distribution error</td>
+                <td style="padding:7px 10px; color:#d29922;">Bucket split</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">ShapeShifter</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Access hotspot</td>
+                <td style="padding:7px 10px; color:#d29922;">Node expansion</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">AHA-tree</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Access frequency</td>
+                <td style="padding:7px 10px; color:#d29922;">B⁺ switch</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">FluidKV</td>
+                <td style="padding:7px 10px; color:#d29922;">Partial · manifest + replay</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Read / write ratio</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 10px;">Prism</td>
+                <td style="padding:7px 10px; color:#7ee787;">Always-persistent</td>
+                <td style="padding:7px 10px; color:#9ca3af;">Eager (every SMO)</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+                <td style="padding:7px 10px; color:#f85149;">✗</td>
+              </tr>
+              <tr class="row-highlight" style="background:rgba(124,111,236,.08); border-bottom:1px solid var(--border2);">
+                <td style="padding:9px 10px; color:#79c0ff; font-weight:500; vertical-align:middle;">TandemKV</td>
+                <td style="padding:9px 10px; color:#7ee787; line-height:1.45;">DRAM–PMEM dual,<br>remap-free</td>
+                <td style="padding:9px 10px; color:#7ee787; line-height:1.45;">Path stability<br>+ divergence</td>
+                <td style="padding:9px 10px; color:#7ee787; line-height:1.45;">SGP prefill<br>/ link</td>
+                <td style="padding:9px 10px; color:#7ee787; line-height:1.45;">Write cost<br>+ crash quality</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-body" style="margin-top:10px; font-size:14px; color:#9ca3af;">
+          <span style="color:#7ee787;">green</span> = matches TandemKV's design goal; <span style="color:#d29922;">amber</span> = partial support; <span style="color:#f85149;">red</span> = absent. TandemKV is the only entry with green in all four design-goal columns.
+        </div>
+      </div>
+
+        <div class="card">
+        <div class="card-title">The three knobs at a glance</div>
+        <div class="card-body" style="margin-top:4px;">Three orthogonal control parameters govern adaptive SMO management.</div>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:.6rem; margin-top:10px;">
+          <div class="knob">
+            <div class="knob-title" style="color:#6eb5f5; white-space:nowrap;">σ — path stability</div>
+            <div class="knob-body" style="font-size:15.5px;"><em>"How much routing imbalance is tolerated before local SMO fires?"</em><br><br> <!--Bounds search-path imbalance in the main index. Trades search overhead against restructuring cost.--></div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent2); white-space:nowrap;">δ — shadow divergence</div>
+            <div class="knob-body" style="font-size:15.5px;"><em>"How far may the shadow drift before a checkpoint is forced?"</em><br><br> <!--Bounds structural lag. Trades steady-state persistence overhead against post-crash search quality.--></div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent3); white-space:nowrap;">m — noise margin</div>
+            <div class="knob-body" style="font-size:15.5px;"><em>"How much predicted insert pressure justifies pre-allocating an SGP?"</em><br><br> <!--Bounds mis-speculation. Trades hotspot reaction speed against wasted SGP slots.--></div>
+          </div>
+        </div>
+      </div>      
+
+      <div class="card">
+        <div class="card-title">Headline results</div>
+        <!--<div class="card-body" style="margin-top:4px;">YCSB workloads on a dual-socket Xeon Gold 5218 + 256 GB Intel Optane PMem (App Direct, ext4-DAX), against Prism, FluidKV, ListDB, DPTree.</div>-->
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:.6rem; margin-top:10px;">
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#79c0ff; font-weight:500;">−50<span style="font-size:13px; color:#8b949e; margin-left:4px;">% I/O</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Index-write volume reduction <!--(Full vs. Base) under skewed bulk-load--></div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#e3b341; font-weight:500;">&gt;90<span style="font-size:13px; color:#8b949e; margin-left:4px;">% ckpts </span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Fewer checkpoints with tunable δ <!--relaxes from 1.01 → 1.5 (≈85K → ≈7K over 100M KV)--></div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#d2a8ff; font-weight:500;">2.36<span style="font-size:13px; color:#8b949e; margin-left:4px;">GB NVM</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Reasonable resource utilization <!--for 100M KV (vs. 6.90 Prism, 4.80 FluidKV, 3.80 ListDB, 4.39 DPTree)--></div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#7ee787; font-weight:500;">&approx;0<span style="font-size:13px; color:#8b949e; margin-left:4px;">s recovery</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Instant recovery (stale-shadow mode)</div>
+          </div>
+        </div>
+        <div class="card-body" style="margin-top:10px; color:var(--muted);">
+          Recovery (log-replay mode): <code style="font-family:var(--mono);font-size:13px;">0.05 s</code> at δ=1.01 to <code style="font-family:var(--mono);font-size:13px;">1.65 s</code> at δ=10 — bounded by the size of the deferred SMO redo log, not by an index rebuild.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">When TandemKV fits — and when it doesn't</div>
+          <div>
+            <div style="color:#7ee787; font-family:var(--mono); font-size:14px;">▸ Good fit</div>
+            <div class="card-body" style="font-size:16.5px; margin-bottom:10px;">
+              · KV workloads on heterogeneous memory (DRAM + byte-addressable Optane DIMM/CMM-H...).<br>
+              · Mixed read/write traffic spanning <em>both</em> random and skewed access patterns — adaptive SMO mix is a well fit for shifting workloads.<br>
+              · Write-heavy or insert-bursty workloads where critical-path persistence dominates.<br>
+              · Deployments that favor fast post-crash availability with low index persistence cost at runtime.
+            </div>
+          </div>
+          <div>
+            <div style="color:#f85149; font-family:var(--mono); font-size:14px;">▸ Not the right tool</div>
+            <div class="card-body" style="font-size:16.5px;">
+              · Distributed / sharded deployments — replication and partitioning are not supported yet.<br>
+              · Pure read-only datasets — the deferred / speculative machinery has nothing to amortize over; a static B⁺-tree or learned index would do as well with less complexity.<br>
+              · Block-only storage hierarchies (no byte-addressable NVM) — the symmetric-pool / offset addressing assumes DAX-style load/store access.
+            </div>
+          </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Beyond Optane — emerging memory solutions</div>
+        <div class="card-body" style="margin-top:4px;">
+          TandemKV depends on three hardware properties: byte-addressability, DAX-style load/store, and hardware-managed persistence ordering. <b>CMM-H</b> (CXL-attached persistent memory: DRAM cache backed by NAND via fsdax) satisfies all three, making it a natural successor target. Two design choices line up especially well: stale-shadow recovery exploits spatial locality instead of pointer-chasing rebuilds, and group-committed persistence reinforces CMM-H's internal coalescing — TandemKV reduces flushes reaching the device, CMM-H reduces NAND amplification per flush.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Key terminology</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 20px; margin-top:8px;">
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-p" style="min-width:42px; text-align:center; font-size:13px;">SMO</span><span style="font-size:13.5px; color:#9ca3af;">Structure modification operation — split / merge / GP activation</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-o" style="min-width:42px; text-align:center; font-size:13px;">σ</span><span style="font-size:13.5px; color:#9ca3af;">Path-stability threshold — when DRAM rebalancing fires</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-p" style="min-width:42px; text-align:center; font-size:13px;">iNode</span><span style="font-size:13.5px; color:#9ca3af;">Internal routing node (DRAM main index)</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-o" style="min-width:42px; text-align:center; font-size:13px;">δ</span><span style="font-size:13.5px; color:#9ca3af;">Shadow-divergence threshold — when PMEM shadow checkpoints</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-p" style="min-width:42px; text-align:center; font-size:13px;">vNode</span><span style="font-size:13.5px; color:#9ca3af;">Append-only value node (PMEM)</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-o" style="min-width:42px; text-align:center; font-size:13px;">m</span><span style="font-size:13.5px; color:#9ca3af;">Noise-rejection margin — gates SGP allocation on predicted pressure</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-t" style="min-width:42px; text-align:center; font-size:13px;">GP</span><span style="font-size:13.5px; color:#9ca3af;">Guidepost — stable routing entry inside an iNode</span></div>
+          <div style="display:flex; gap:8px; align-items:center; padding:3px 0;"><span class="tag tag-t" style="min-width:42px; text-align:center; font-size:13px;">SGP</span><span style="font-size:13.5px; color:#9ca3af;">Speculative guidepost — dormant slot, pre-filled split key</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ARCHITECTURE -->
+  <div id="arch" class="section">
+    <div class="sec-title">Architecture</div>
+      <div class="sec-desc">TandemKV splits responsibility across a DRAM index that serves every foreground operation and a PMEM image that is updated only by background propagation. The design goal is visible in what does <em>not</em> happen on the critical path: no PMEM index writes, no fences, no pointer fix-up, no synchronous checkpoint.</div>
+
+    <figure style="margin:0 0 1.25rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem;">
+      <img src="figures/fig1_architecture.png" alt="TandemKV system architecture: DRAM pool with main index and deferred SMOs; identical offset-based PMEM mirror plus vNode data pool; iNode with eager GP and lazy SGP routing slots; index architecture with hotspot monitoring, probabilistic inter-node skip, and speculative/proactive SMO policies." style="width:100%; height:auto; display:block; border-radius:4px;">
+      <figcaption style="font-size:13px; color:var(--muted); font-family:var(--mono); margin-top:.6rem; text-align:center;">Figure 1 — TandemKV system architecture.</figcaption>
+    </figure>
+  
+    <div class="card">
+      <div class="two">
+        <div class="knob">
+          <div class="knob-title" style="color:#6eb5f5;">DRAM-resident main index</div>
+          <div class="knob-body">Skiplist-style traversal combined with B⁺-tree-inspired wide nodes —  Serves all foreground reads and writes. Absorbs all SMOs immediately. Holds iNodes (routing) with references to PMEM vNodes (data). Lock-free traversal with targeted iNode/vNode caching.</div>
+        </div>
+        <div class="knob">
+          <div class="knob-title" style="color:var(--accent2);">PMEM-resident shadow index</div>
+          <div class="knob-body">An <em>identical offset-based mirror</em> of the DRAM iNode pool acts as the durable restart image with every cross-object reference encoded as a pool index rather than a pointer. Updated only at async checkpoints; can be memory-mapped and reused with no swizzling.</div>
+        </div>
+      </div>
+    
+
+    <div class="card">
+      <div class="card-title" style="color:var(--accent3);">Value storage — persistent vNode pool</div>
+      <div class="card-body" style="margin-top:4px;">
+        A separate <em>data pool</em> of append-only vNodes holds the actual records (separate from the index); writes land in unordered arrays via non-temporal stores. Bloom filters and per-entry fingerprints compensate for the unordered layout. An adaptive size-bounded DRAM Bloom-filter cache promotes filters for hot vNodes in the background.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Symmetric layout — offset-based addressing for crash-safe reuse</div>
+    <div class="card-body" style="margin-top:4px;">
+      The DRAM main index and the PMEM shadow index live in <strong style="font-weight:500;">virtual-address-symmetric pools</strong>: one reserved region in DRAM, one in PMEM, both indexed identically. Every cross-object reference inside the index — parent→child, GP→vNode, sibling links — is encoded as a <em>pool-relative offset</em> rather than an absolute pointer.
+    </div>
+    <div class="code" style="margin-top:8px;">// instead of: Inode* child = parent->children[i];        // absolute pointer
+//                                                       // → invalid after restart
+// TandemKV uses:  uint32_t off = parent->children[i];  // offset within iNode pool
+//                 Inode* child = &iNodePool[off];      // resolved against pool base</div>
+    <div class="card-body" style="margin-top:8px;">
+      Because offsets are independent of where the OS chooses to map the region, the persisted shadow image survives restart unchanged. Recovery does three things and nothing else:
+      <br><br>
+      <span class="tag tag-t" style="margin-right:6px;">1</span> <code style="font-family:var(--mono);font-size:14px;">mmap()</code> the PMEM pool (DAX, no page-cache double-buffering)<br>
+      <span class="tag tag-t" style="margin-right:6px;">2</span> Copy the checkpointed shadow image into the DRAM pool (offsets stay valid)<br>
+      <span class="tag tag-t" style="margin-right:6px;">3</span> Reload lightweight runtime metadata (skiplist height, allocation counters) flushed periodically alongside checkpoints
+      <br><br>
+      No pointer swizzling, no address translation table, no log-replay-driven rebuild. The system serves traffic the moment the copy finishes.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Operational semantics — one rule, two clocks</div>
+    <div class="card-body" style="margin-top:4px;">
+      The two index representations advance on different clocks, governed by a single rule: <strong style="font-weight:500;">all SMO logic executes on the DRAM main index; the PMEM shadow is updated only asynchronously.</strong> Foreground operations never perform an in-place SMO on the shadow index.
+      <br><br>
+      When an SMO triggers, its structural effect is applied immediately to the main index. If the adaptive SMO policy decides the change must eventually be reflected in persistent state, TandemKV appends a compact redo record — <code style="font-family:var(--mono);font-size:14px;">(iNode-ID, SMO-type, payload)</code> — to a <em>persistent SMO redo log</em>. Records accumulate in the log and are replayed to the shadow index in <strong style="font-weight:500;">batched group updates</strong> during background checkpoints; the shadow is never modified one SMO at a time.
+      <br><br>
+      This separation cleaves three concerns that prior systems conflate: <span style="color:#6eb5f5;">foreground search</span> runs on the live structure, <span style="color:var(--accent2);">structural adaptation</span> rewrites it without waiting for fences, and <span style="color:var(--accent3);">durable structural persistence</span> happens later, in bulk, only when search-quality and divergence signals justify the I/O.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">iNode [dual-guidepost abstraction]</div>
+    <div class="card-body" style="margin-top:4px;">
+      Each iNode maintains two kinds of routing entries that separate stable state from speculative expansion:<br><br>
+      <span class="tag tag-t">GP</span> <em>Lazy</em> path: stable routing entries created on-demand (real routing decisions), delta-logged, durable across checkpoints.<br><br>
+      <span class="tag tag-p">SGP</span> <em>Eager</em> path: dormant placeholders pre-filled with predicted split keys, gated by an atomic visibility bitmap (zero lookup overhead while inactive). When an incoming split validates a predicted key, the SGP slot is <em>linked</em> — a single atomic fetch-or publishes it, replacing what would otherwise be a reactive GP creation. Predicted slots that aren't linked are discarded silently at next reorganization.
+    </div>
+
+    <div style="margin-top:14px; background:#0d1117; border:1px solid var(--border); border-radius:6px; padding:14px; font-family:var(--mono); font-size:13.5px; line-height:1.55; color:#c9d1d9; overflow-x:auto;">
+      <div style="color:var(--muted); margin-bottom:10px;">// iNode in-memory layout — visibility bitmap gates SGP visibility</div>
+      <div style="display:grid; grid-template-columns:auto 1fr; gap:0 14px; align-items:center;">
+        <div style="color:#8b949e;">header</div>
+        <div style="display:flex; gap:4px;">
+          <span style="background:#161b22; border:1px solid #30363d; padding:3px 10px; border-radius:3px;">level</span>
+          <span style="background:#161b22; border:1px solid #30363d; padding:3px 10px; border-radius:3px;">key_count</span>
+          <span style="background:#161b22; border:1px solid #30363d; padding:3px 10px; border-radius:3px;">version</span>
+        </div>
+
+        <div style="color:#8b949e; margin-top:8px;">GP[]</div>
+        <div style="display:flex; gap:4px; margin-top:8px;">
+          <span style="background:#1a2f1f; border:1px solid #2ea043; color:#7ee787; padding:3px 10px; border-radius:3px;">GP₀</span>
+          <span style="background:#1a2f1f; border:1px solid #2ea043; color:#7ee787; padding:3px 10px; border-radius:3px;">GP₁</span>
+          <span style="background:#1a2f1f; border:1px solid #2ea043; color:#7ee787; padding:3px 10px; border-radius:3px;">GP₂</span>
+          <span style="background:#1a2f1f; border:1px solid #2ea043; color:#7ee787; padding:3px 10px; border-radius:3px;">GP₃</span>
+          <span style="color:#6e7681; padding:3px 6px;">·  ·  ·</span>
+          <span style="color:#6e7681; font-size:12.5px; align-self:center;">(always visible to lookups)</span>
+        </div>
+
+        <div style="color:#8b949e; margin-top:8px;">sgpVisible</div>
+        <div style="display:flex; gap:0; margin-top:8px; font-weight:600;">
+          <span style="background:#1f1414; border:1px solid #f85149; color:#ffa198; padding:3px 9px; border-radius:3px 0 0 3px;">1</span>
+          <span style="background:#161b22; border:1px solid #30363d; border-left:none; color:#6e7681; padding:3px 9px;">0</span>
+          <span style="background:#1f1414; border:1px solid #f85149; border-left:none; color:#ffa198; padding:3px 9px;">1</span>
+          <span style="background:#1f1414; border:1px solid #f85149; border-left:none; color:#ffa198; padding:3px 9px;">1</span>
+          <span style="background:#161b22; border:1px solid #30363d; border-left:none; color:#6e7681; padding:3px 9px;">0</span>
+          <span style="background:#161b22; border:1px solid #30363d; border-left:none; color:#6e7681; padding:3px 9px;">0</span>
+          <span style="background:#161b22; border:1px solid #30363d; border-left:none; color:#6e7681; padding:3px 9px;">0</span>
+          <span style="background:#161b22; border:1px solid #30363d; border-left:none; color:#6e7681; padding:3px 9px 3px 9px; border-radius:0 3px 3px 0;">0</span>
+          <span style="color:#6e7681; padding:3px 6px; font-size:12.5px; align-self:center;">← atomic uint64_t bitmap</span>
+        </div>
+
+        <div style="color:#8b949e; margin-top:8px;">SGP[]</div>
+        <div style="display:flex; gap:4px; margin-top:8px;">
+          <span style="background:#2d1f0d; border:1px solid #d29922; color:#e3b341; padding:3px 10px; border-radius:3px;">SGP₀ ✓</span>
+          <span style="background:#161b22; border:1px solid #30363d; color:#484f58; padding:3px 10px; border-radius:3px;">SGP₁</span>
+          <span style="background:#2d1f0d; border:1px solid #d29922; color:#e3b341; padding:3px 10px; border-radius:3px;">SGP₂ ✓</span>
+          <span style="background:#2d1f0d; border:1px solid #d29922; color:#e3b341; padding:3px 10px; border-radius:3px;">SGP₃ ✓</span>
+          <span style="background:#161b22; border:1px solid #30363d; color:#484f58; padding:3px 10px; border-radius:3px;">SGP₄</span>
+          <span style="color:#6e7681; padding:3px 6px;">·  ·  ·</span>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; padding-top:10px; border-top:1px dashed #30363d; color:#8b949e; font-size:13px; line-height:1.6;">
+        <span style="color:#7ee787;">■</span> GP — always visible &nbsp;·&nbsp;
+        <span style="color:#e3b341;">■</span> SGP linked (bit = 1) — visible to lookups, predicted key validated &nbsp;·&nbsp;
+        <span style="color:#484f58;">■</span> SGP dormant (bit = 0) — invisible, discarded silently at next reorg<br>
+        <span style="color:#c9d1d9;">linking: </span><code style="color:#7ee787;">atomic_fetch_or(&sgpVisible, 1ULL &lt;&lt; slot)</code> — single uncontended op, no allocation, no fence on the read path.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Persistent SMO redo log — propagation order matters</div>
+    <div class="card-body" style="margin-top:4px;">
+      Each redo record carries a fixed header followed by a type-specific payload describing exactly what the shadow index must replay:
+    </div>
+    <div class="code" style="margin-top:8px;">struct RedoRecord {
+    uint32_t  inode_id;       // target iNode (offset within symmetric pool)
+    uint8_t   smo_type;       // GP_CREATE | SGP_LINK | INODE_SPLIT | ...
+    /* payload: e.g., new GP key, child iNode offset, slot index, ... */
+};
+// commit path: write record → CLWB + SFENCE → in-memory SMO complete</div>
+    <div class="card-body" style="margin-top:8px;">
+      A background flusher drains accumulated records in batches, replaying them onto the shadow index. Larger batches amortize persistence cost; smaller batches narrow the structural gap and shorten post-crash convergence — the trade-off governed by <code style="font-family:var(--mono);font-size:14px;">δ</code>.
+      <br><br>
+      <strong style="font-weight:500;">Critical invariant — child before parent.</strong> When replaying a split, the new child iNode is persisted <em>first</em>; the parent's pointer to it is updated only after the child is durable. This single ordering rule is what makes a partially-checkpointed shadow safe to use after a crash: every reachable parent pointer resolves to a fully-formed child, even if the most recent batch was interrupted mid-flight. Recovery therefore needs no fix-up pass — it just memory-maps the shadow and serves traffic.
+    </div>
+  </div>
+  </div>
+        <!-- SMO POLICIES -->
+    <div id="smo" class="section">
+      <div class="sec-title">SMO policies</div>
+      <div class="sec-desc">TandemKV classifies structural work into three categories and uses two complementary policies to shift the composition away from expensive reactive SMOs.</div>
+
+      <div class="card">
+        <div class="card-title">SMO classification</div>
+        <div class="api-row" style="margin-top:4px;"><span class="api-name" style="color:var(--accent3);">Reactive SMO</span><span class="api-desc">Triggered when path stability (σ) is violated. Creates a new GP inside an iNode, or splits the iNode at capacity. Most expensive — incurs structural write cost.</span></div>
+        <div class="api-row"><span class="api-name" style="color:var(--accent2);">Proactive SMO</span><span class="api-desc">SGP linking — materializes a pre-provisioned speculative slot. Cheaper than creating a new routing entry from scratch.</span></div>
+        <div class="api-row"><span class="api-name" style="color:#6eb5f5;">Avoided SMO</span><span class="api-desc">Insert lands within an existing GP/SGP range with no structural change needed. Zero persistence cost.</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Deferred SMOs — random-write workloads</div>
+        <div class="card-body" style="margin-top:4px;">
+          Each iNode tracks a local <strong style="font-weight:500;">path stability (PS)</strong> metric: ratio of longest to shortest traversal paths to its children. When PS exceeds the level-specific threshold σₗ, a deferred SMO (GP creation/iNode split) fires.<br><br>
+          GP/SGP hits — inserts absorbed by existing routing entries with no restructuring — are the cheapest outcome. A separate guidepost-level stability control handles cases where one guidepost dominates traffic even when the iNode appears globally balanced.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Per-GP stability control</div>
+        <div class="card-body" style="margin-top:4px;">
+          Each GP in an iNode tracks a <code style="font-family:var(--mono);font-size:14px;">covered_nodes</code> counter — the number of child vNodes reachable through that GP. Stability is checked at the <em>individual GP level</em>, not just the iNode aggregate. A GP is considered unbalanced when:
+        </div>
+        <div class="code" style="margin-top:8px;">gp_covered[i] > SEARCH_STABILITY_COEFFICIENT_BY_LEVEL[level]</div>
+        <div class="card-body" style="margin-top:4px;">
+          Default coefficients: L0 = 3, L1 = 3, L2+ = 1. This means upper levels tolerate almost no imbalance (σ = 1 child per GP), while leaf-adjacent levels absorb more splits before rebalancing. When a GP exceeds its coefficient, a new GP is activated to bisect its covered range.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Speculative SMOs — skewed workloads</div>
+        <div class="card-body" style="margin-top:4px;">
+          An epoch-based hotspot detector forecasts insert pressure per key range. When predicted volume exceeds routing capacity, dormant SGPs are pre-placed at quantile-derived split keys. If the prediction hits, SGP linking replaces an expensive reactive split. If not, the dormant SGP is silently discarded.<br><br>
+          Full pipeline details — hotspot monitoring, prediction, anchor placement, and the async scheduling architecture — are covered in the <a href="#" onclick="show('spec', document.querySelector('[onclick*=spec]')); return false;" style="color:var(--accent);text-decoration:none;">Speculation</a> section.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Five split paths</div>
+        <div class="card-body" style="margin-top:4px;">
+          When a vNode splits and the parent iNode must be updated, the system attempts each path in priority order. Lower-letter paths are cheaper (less logging, no structural change).
+        </div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);min-width:60px;">Path A</span><span class="api-desc">Insert landed within linked SGP range — update stats <code style="font-family:var(--mono);font-size:14px;">sgp_covered++</code>. <strong>Zero log cost.</strong></span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);min-width:60px;">Path B</span><span class="api-desc">Insert landed within existing GP range — update stats <code style="font-family:var(--mono);font-size:14px;">gp_covered++</code>. <strong>Zero log cost.</strong></span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);min-width:60px;">Path C</span><span class="api-desc">Predicted insert materializes (lands within dormant SGP range) — link via <code style="font-family:var(--mono);font-size:14px;">linkInactiveSGP()</code>. Attempted twice: once before Path B, once before Path D.</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);min-width:60px;">Path D</span><span class="api-desc">GP coverage is insufficient and no SGP available — create a new GP via <code style="font-family:var(--mono);font-size:14px;">activateGP()</code>.</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);min-width:60px;">Path E</span><span class="api-desc">iNode is full (all slots occupied) — enqueue for background rebalance. Split iNode via <code style="font-family:var(--mono);font-size:14px;">splitWithSGP()</code> [promotes visible SGPs into the GP array].</span></div>
+        </div>
+        <div class="card-body" style="margin-top:10px; font-size:14.5px;">
+          The dispatch is a single priority chain on the split path ──► A — C — B — C — D — E. With earlier exits being cheaper, so the chain biases structural work toward zero-log outcomes whenever a prior speculation step has left routing capacity in place.
+        </div>
+<!--
+        <div style="margin-top:14px; background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:18px 16px; overflow-x:auto;">
+          <div style="display:grid; grid-template-columns:minmax(260px, 1fr) 80px minmax(280px, 1fr); gap:10px 14px; align-items:center; font-family:var(--mono); font-size:13.5px; min-width:660px;">
+
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:10px 12px; color:#c9d1d9;">lookup hit a linked SGP &amp; slot still valid?</div>
+            <div style="color:#8b949e; text-align:center;">YES&nbsp;──►</div>
+            <div style="border:1px solid #2ea043; background:rgba(46,160,67,.08); border-radius:6px; padding:10px 12px; color:#7ee787;"><b>Path A</b> · <code style="color:#7ee787;">sgp_covered++</code> + seed SGP</div>
+
+            <div style="color:#8b949e; padding-left:14px;">│ NO</div><div></div><div></div>
+
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:10px 12px; color:#c9d1d9;"><code style="color:#c9d1d9;">linkInactiveSGP()</code> — a dormant SGP covers the key?</div>
+            <div style="color:#8b949e; text-align:center;">YES&nbsp;──►</div>
+            <div style="border:1px solid #2ea043; background:rgba(46,160,67,.08); border-radius:6px; padding:10px 12px; color:#7ee787;"><b>Path C</b> (eager) · link bit flip</div>
+
+            <div style="color:#8b949e; padding-left:14px;">│ NO</div><div></div><div></div>
+
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:10px 12px; color:#c9d1d9;"><code style="color:#c9d1d9;">checkForActivateNextGP()</code> — GP still balanced?</div>
+            <div style="color:#8b949e; text-align:center;">YES&nbsp;──►</div>
+            <div style="border:1px solid #d29922; background:rgba(210,153,34,.08); border-radius:6px; padding:10px 12px; color:#e3b341;"><b>Path B</b> · <code style="color:#e3b341;">gp_covered++</code>, seed SGP if ≥ coeff/2</div>
+
+            <div style="color:#8b949e; padding-left:14px;">│ NO (unbalanced)</div><div></div><div></div>
+
+
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:10px 12px; color:#c9d1d9;"><code style="color:#c9d1d9;">linkInactiveSGP()</code> — SGP seeded meanwhile?</div>
+            <div style="color:#8b949e; text-align:center;">YES&nbsp;──►</div>
+            <div style="border:1px solid #2ea043; background:rgba(46,160,67,.08); border-radius:6px; padding:10px 12px; color:#7ee787;"><b>Path C</b> (last-chance) · link bit flip</div>
+
+            <div style="color:#8b949e; padding-left:14px;">│ NO</div><div></div><div></div>
+
+
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:10px 12px; color:#c9d1d9;"><code style="color:#c9d1d9;">activateGPForVnode()</code> — GP slot still free?</div>
+            <div style="color:#8b949e; text-align:center;">YES&nbsp;──►</div>
+            <div style="border:1px solid #e07b54; background:rgba(224,123,84,.08); border-radius:6px; padding:10px 12px; color:#e07b54;"><b>Path D</b> · new GP + post-D SGP seed</div>
+
+            <div style="color:#8b949e; padding-left:14px;">│ NO (iNode full)</div><div></div><div></div>
+
+
+            <div style="grid-column:1 / -1; display:flex; justify-content:flex-end;">
+              <div style="border:1px solid #e07b54; background:rgba(224,123,84,.08); border-radius:6px; padding:10px 12px; color:#e07b54; min-width:280px;"><b>Path E</b> · enqueue background rebalance</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px; display:flex; gap:16px; flex-wrap:wrap; font-family:var(--sans); font-size:12.5px; color:#9ca3af;">
+            <span><span style="display:inline-block; width:10px; height:10px; background:rgba(46,160,67,.35); border:1px solid #2ea043; border-radius:2px; vertical-align:middle; margin-right:4px;"></span>zero log — proactive / avoided</span>
+            <span><span style="display:inline-block; width:10px; height:10px; background:rgba(210,153,34,.35); border:1px solid #d29922; border-radius:2px; vertical-align:middle; margin-right:4px;"></span>DELTA — group-committed</span>
+            <span><span style="display:inline-block; width:10px; height:10px; background:rgba(224,123,84,.35); border:1px solid #e07b54; border-radius:2px; vertical-align:middle; margin-right:4px;"></span>FULL — reactive</span>
+          </div>
+        </div>
+        -->
+        <div class="card-body" style="margin-top:8px; font-size:14.5px;">
+          <span style="color:var(--accent3); font-family:var(--mono);">Reading the ablation through this chain.</span> <em>Base+S</em> adds the two Path-C branches — so the Load workload picks up 55% of structural work as proactive routing (Paths A + C). <em>Base+D</em> skips SMO persistence on non-structural events (Path B), so 61% of inserts land inside an existing GP without ever leaving the B branch. <em>Full (S+D+G)</em> is what the chain looks like with every branch enabled; the remaining 17% reaches D / E.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">SGP slot management</div>
+        <div class="card-body" style="margin-top:4px;">
+          Each iNode stores GP/SGP slots in separate Structure-of-Arrays (SoA) layout[key, value, covered count]. SGP visibility is tracked by an atomic bitmap (<code style="font-family:var(--mono);font-size:14px;">sgpVisible</code>) — a set bit means the SGP has been linked and participates in routing.
+        </div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:#6eb5f5;">Dormant SGP</span><span class="api-desc">Invisible (bit = 0), value = sentinel (−1). Zero lookup overhead — readers never examine invisible slots.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">Linked SGP</span><span class="api-desc">Visible (bit = 1), value = vNode ID. Participates in routing via <code style="font-family:var(--mono);font-size:14px;">lookupBetterSGP()</code> bitmap scan.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent3);">Spent SGP</span><span class="api-desc">Visible but <code style="font-family:var(--mono);font-size:14px;">sgp_covered > coeff</code>. Has served its purpose.</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px;">
+          When the SGP array is full, new speculation can trigger eviction of invisible (never-linked) slots. Eviction shifts the array down and recomputes the visibility bitmap in a single atomic store.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">SGP linking protocol</div>
+        <div class="card-body" style="margin-top:4px;">
+          Linking converts a dormant SGP into an active routing entry. The protocol is designed for lock-free readers:
+        </div>
+        <div class="code" style="margin-top:8px;">// node.h — linkInactiveSGP()
+sgp_keys[pos]    = actual_split_key;    // update anchor to real split point
+sgp_values[pos]  = vnode_id;            // set down-pointer
+sgp_covered[pos] = covered_nodes;       // initialize coverage count
+sgpVisible.fetch_or(1u << pos,          // publish with release ordering:
+    memory_order_release);              // data writes above visible to readers</div>
+        <div class="card-body" style="margin-top:4px;">
+          The <code style="font-family:var(--mono);font-size:14px;">fetch_or</code> with release ordering ensures that readers who observe the visibility bit also see the updated key/value/covered fields. The <code style="font-family:var(--mono);font-size:14px;">lookupBetterSGP()</code> routine on the read path uses <code style="font-family:var(--mono);font-size:14px;">memory_order_acquire</code> when loading the bitmap, forming a release-acquire pair.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Coordination rules</div>
+        <div class="inv-row" style="margin-top:4px;"><span class="inv-num">1</span><span class="card-body">Use-before-create: if a dormant SGP already covers the key range needing repair, link it rather than creating a new GP. Speculation is also skipped for that range.</span></div>
+        <div class="inv-row"><span class="inv-num">2</span><span class="card-body">Reactive overrides proactive: proactive SGP allocation is restricted to iNodes with pending stability repairs, preventing speculative overhead from stacking on reactive repair cost.</span></div>
+        <div class="inv-row"><span class="inv-num">3</span><span class="card-body">Version-guarded speculation: the background speculator captures <code style="font-family:var(--mono);font-size:14px;">structure_version</code> before scanning GP intervals. If a concurrent rebalance changes the version, SGP activation is skipped to avoid placing anchors on a stale layout.</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Rebalance-time SGP merge</div>
+        <div class="card-body" style="margin-top:4px;">
+          When an iNode is full (Path E) and rebalanced, <code style="font-family:var(--mono);font-size:14px;">splitWithSGP()</code> performs a two-pointer merge of the sorted GP array and the visible SGP entries into a temporary buffer, then splits the merged result evenly between the original and new iNode. This promotes useful SGPs to full GP status and discards invisible (unused) SGPs in a single pass. After the split, the SGP array and visibility bitmap are reset.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Probabilistic splits across levels</div>
+        <div class="card-body">When a split is necessary, TandemKV samples propagation depth from a biased distribution (skiplist-style) rather than escalating one level at a time. This amortizes upper-level structural work and pre-installs routing capacity for future growth.</div>
+      </div>
+    </div>
+
+
+    <!-- SPECULATION -->
+    <div id="spec" class="section">
+      <div class="sec-title">Speculation</div>
+      <div class="sec-desc">TandemKV's speculative pipeline runs entirely off the critical insert path. It monitors workload distribution, predicts future hotspots, and pre-provisions SGP routing entries — converting expensive reactive SMOs into cheap link operations when the predictions land.</div>
+
+      <div class="card">
+        <div class="card-title">Pipeline overview</div>
+        <div class="flow" style="margin-top:6px;">
+          <span class="fstep">insert hot path</span><span class="farr">→</span>
+          <span class="fstep">1-in-256 sampling</span><span class="farr">→</span>
+          <span class="fstep">AsyncSampler queue</span><span class="farr">→</span>
+          <span class="fstep">InsertTracker</span>
+        </div>
+        <div class="flow">
+          <span class="fstep">vNode split</span><span class="farr">→</span>
+          <span class="fstep">submit split key</span><span class="farr">→</span>
+          <span class="fstep">epoch check</span><span class="farr">→</span>
+          <span class="fstep">AsyncSpeculator</span><span class="farr">→</span>
+          <span class="fstep">maybeActivateHotRegion()</span>
+        </div>
+        <div class="card-body" style="margin-top:6px;">
+          Two async subsystems feed the tracker. Insert keys are subsampled on the hot path (zero contention). Split keys are submitted at full rate after each vNode split. When a completed epoch histogram becomes available, the speculator is CAS-triggered to run anchor placement.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 1 — Insert-key sampling</div>
+        <div class="card-body" style="margin-top:4px;">
+          Each insert thread maintains a thread-local 8-bit counter. Every 256th insert submits the key to the <code style="font-family:var(--mono);font-size:14px;">AsyncSampler</code> lock-free queue with <code style="font-family:var(--mono);font-size:14px;">weight=256</code> to restore true insert volume in the epoch counter. Hot-path cost: 1 TLS increment + 1 untaken branch (2 instructions).
+        </div>
+        <div class="code" style="margin-top:8px;">// tandemIndex.cpp — insert() hot path
+thread_local uint8_t _ins_ctr = 0;
+if ((++_ins_ctr & 0xFF) == 0)           // every 256 inserts per thread
+    sampler_->SubmitInsert(key, 256);    // weight restores true epoch frequency</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 2 — Split-key feeding</div>
+        <div class="card-body" style="margin-top:4px;">
+          After every vNode split, the actual split key is submitted to the sampler with <code style="font-family:var(--mono);font-size:14px;">weight=1</code>. Split keys directly reflect where structural work is happening — complementing insert-key samples which reflect where writes land. This dual-signal approach gives the histogram both <em>demand</em> (insert frequency) and <em>cost</em> (split locations) information.
+        </div>
+        <div class="code" style="margin-top:8px;">// tandemIndex.cpp — handleNodeFullAndSplit()
+sampler_->Submit(next_right_min);           // split key, weight=1
+if (tracker_->LastEpochHistogramValid())
+    speculator_->TrySubmit();               // CAS-trigger speculation</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 3 — Reservoir sampling &amp; epoch management</div>
+        <div class="card-body" style="margin-top:4px;">
+          The <code style="font-family:var(--mono);font-size:14px;">InsertTracker</code> maintains a fixed-size reservoir sample using <strong style="font-weight:500;">Algorithm L</strong> (optimal reservoir sampling). At each epoch boundary, the reservoir is sorted to produce equi-depth partition boundaries, per-partition counters are frozen as the "last epoch", and a new epoch begins.
+        </div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Epoch size</span><span class="api-desc">100K weighted inserts (~390 real samples per epoch, ~4 per partition)</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Partitions</span><span class="api-desc">100 equi-depth histogram bins derived from sorted reservoir</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Reservoir size</span><span class="api-desc">1000 keys (≥ 10× partitions for quality boundaries)</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Warm-up</span><span class="api-desc">~256K real inserts (~107 ms at 2.4M ops/s) to fill reservoir</span></div>
+        </div>
+        <div class="code" style="margin-top:8px;">// insert_tracker.h — Algorithm L reservoir sampling
+if (num_inserts_ == next_) {
+    reservoir_sample_[random_index] = key;           // replace random item
+    next_ += ⌊log(U) / log(1 − w)⌋ + 1;            // skip-ahead (O(1) amortized)
+    w    *= exp(log(U) / sample_size);               // update acceptance weight
+}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 4 — Hotspot detection</div>
+        <div class="card-body" style="margin-top:4px;">
+          The <code style="font-family:var(--mono);font-size:14px;">GetHottestRegion(w)</code> method slides a window of <em>w</em> contiguous histogram buckets across the frozen epoch and returns the window with the highest aggregate insert count.
+        </div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Window width</span><span class="api-desc">20 buckets (covers 20% of key space at uniform, concentrates under skew)</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Output</span><span class="api-desc"><code style="font-family:var(--mono);font-size:14px;">Region{start, end, weight}</code> — the densest contiguous key range</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px;">
+          The sliding window runs in O(P) time where P is the number of partitions. For partial overlaps, insert forecasting uses linear interpolation: if a query range covers fraction <em>f</em> of a partition, the estimated inserts in that overlap are <code style="font-family:var(--mono);font-size:14px;">count[i] × f</code>.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 5 — Anchor placement</div>
+        <div class="card-body" style="margin-top:4px;">
+          For each GP interval <code style="font-family:var(--mono);font-size:14px;">[lo, hi)</code> within the hot region, the system forecasts future inserts. If the predicted child count (<code style="font-family:var(--mono);font-size:14px;">gp_covered[i] + predicted</code>) would exceed the stability coefficient, quantile-based anchors are placed:
+        </div>
+        <div class="code" style="margin-top:8px;">m = min(⌈predicted / inserts_per_anchor⌉, max_per_node)   // default: 10 inserts/anchor, cap 16
+anchors = placeAnchorsInsideInterval(B, C, lo, hi, m)     // quantile-weighted within [lo+guard, hi−guard)</div>
+        <div class="card-body" style="margin-top:4px;">
+          A 1/16 guard band on each side of the interval prevents SGPs from landing too close to existing GP boundaries. Anchors are placed at cumulative-mass quantiles of the histogram, concentrating SGPs where inserts are densest. A fallback equidistant placement is available when the histogram is too coarse.
+        </div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Guard band</span><span class="api-desc">1/16 of interval width on each side</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Noise floor</span><span class="api-desc">iNode skipped if total predicted inserts &lt; 2σ</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">Per-iNode cap</span><span class="api-desc">16 anchors maximum per speculation round</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stage 6 — SGP activation</div>
+        <div class="card-body" style="margin-top:4px;">
+          Collected anchors are installed under a write lock on the target iNode. The speculator captures the iNode's <code style="font-family:var(--mono);font-size:14px;">structure_version</code> before scanning and re-checks it after acquiring the lock — if a concurrent rebalance changed the version, activation is skipped to avoid placing anchors on a stale layout.
+        </div>
+        <div class="code" style="margin-top:8px;">// tandemIndex.cpp — maybeActivateHotRegion() phase 3
+write_lock(inode->version);
+if (inode->structure_version != version_snapshot) {
+    write_unlock(inode->version);
+    continue;                                       // stale — skip this iNode
+}
+for (uint64_t k : inode_anchors) {
+    if (!inode->isSGPFull())
+        inode->activateSGP(k);                      // insert dormant SGP
+    else if (!inode->evictSpentAndActivateSGP(k))
+        break;                                      // no evictable slot — stop
+}
+write_unlock(inode->version);</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Multi-level activation</div>
+        <div class="card-body" style="margin-top:4px;">
+          Speculation is not limited to the leaf level. The <code style="font-family:var(--mono);font-size:14px;">maybeActivateHotRegion()</code> routine iterates from L0 up through all active levels, placing SGP anchors at every level that covers the hot region. This pre-installs routing capacity at upper levels before cascading splits arrive, reducing the chance that a burst of leaf splits bottlenecks on parent iNode capacity.
+        </div>
+        <div class="code" style="margin-top:8px;">for (int L = 0; L < currentLevel - 1; ++L) {
+    auto inodes = nodesCoveringRangeAtLevel(hot.start, hot.end, L);
+    for (Inode* inode : inodes) {
+        // ... forecast, collect anchors, activate SGPs at this level
+    }
+}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Async scheduling architecture</div>
+        <div class="card-body" style="margin-top:4px;">
+          Two background components decouple speculation from the insert hot path:
+        </div>
+        <div class="two" style="margin-top:8px;">
+          <div class="knob">
+            <div class="knob-title" style="color:#6eb5f5;">AsyncSampler</div>
+            <div class="knob-body">Lock-free <code style="font-family:var(--mono);font-size:13px;">ConcurrentQueue</code> drained by 2 worker threads. Each dequeued item calls <code style="font-family:var(--mono);font-size:13px;">tracker_->AddWeighted(key, weight)</code>. Workers poll with 50 μs backoff when idle.</div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent2);">AsyncSpeculator</div>
+            <div class="knob-body">Single worker thread. Triggered by CAS on a shared <code style="font-family:var(--mono);font-size:13px;">speculation_running_</code> flag — only one speculation round can be in-flight at a time. Runs <code style="font-family:var(--mono);font-size:13px;">maybeActivateHotRegion()</code>, then clears the flag to accept new work. 100 μs poll when idle.</div>
+          </div>
+        </div>
+        <div class="card-body" style="margin-top:4px;">
+          The CAS guard ensures that under heavy split rates, speculation doesn't queue up unboundedly — at most one round runs while subsequent triggers are silently dropped. After each round the frozen epoch histogram is dropped via <code style="font-family:var(--mono);font-size:14px;">DropLastEpochHistogram()</code> to force fresh data for the next round.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Inline speculation (split-path trigger)</div>
+        <div class="card-body" style="margin-top:4px;">
+          Independent of the epoch-based pipeline, Path B of the split handler includes an inline speculation trigger. When a GP's <code style="font-family:var(--mono);font-size:14px;">covered_nodes</code> reaches half the stability coefficient, an SGP is proactively placed at the current split key. This ensures that even under uniform workloads (where the hotspot detector has no signal), frequently-split ranges accumulate SGPs that convert future reactive operations into speculative .
+        </div>
+        <div class="code" style="margin-top:8px;">// Path B inline speculation — no histogram needed
+if (gp_covered[idx] >= max(2, coeff / 2)) {
+    if (!isSGPFull())  activateSGP(targetKey);
+    else               evictSpentAndActivateSGP(targetKey);
+}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Prediction miss handling</div>
+        <div class="card-body" style="margin-top:4px;">
+          SGPs that are never linked remain dormant (invisible bit = 0) and impose zero cost on readers — they are never examined during lookups. Stale SGPs are reclaimed through two mechanisms:
+        </div>
+        <div style="margin-top:8px;">
+          <div class="inv-row"><span class="inv-num">1</span><span class="card-body"><strong style="font-weight:500;">Eviction on demand</strong> — when the SGP array is full and a new activation is needed, invisible (never-linked) slots are evicted first, then spent (unbalanced) slots.</span></div>
+          <div class="inv-row"><span class="inv-num">2</span><span class="card-body"><strong style="font-weight:500;">Rebalance-time merge</strong> — when <code style="font-family:var(--mono);font-size:14px;">splitWithSGP()</code> runs, only visible SGPs are merged into the GP array. Invisible ones are silently discarded and the bitmap is reset.</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Per-epoch SGP budget</div>
+        <div class="card-body" style="margin-top:4px;">
+          The total number of SGPs placed per speculation round is bounded by both the available free slots across hot iNodes and the predicted insert volume:
+        </div>
+        <div class="code" style="margin-top:8px;">Sₑ = min(S_free, ⌊Î_{e+1} / (m · Q)⌋)
+
+S_free    = total empty SGP slots across iNodes in the hot region
+Î_{e+1}  = forecasted inserts for next epoch (from histogram extrapolation)
+m         = noise-rejection margin (default ≥ 1)
+Q         = inserts_per_anchor (default: 10)</div>
+        <div class="card-body" style="margin-top:4px;">
+          After each round, the epoch histogram is dropped to force fresh sampling data before the next speculation cycle.
+        </div>
+      </div>
+    </div>
+
+
+    <!-- CONTROL PARAMETERS -->
+    <div id="params" class="section">
+      <div class="sec-title">Control parameters</div>
+      <div class="sec-desc">Three primary deployment knobs govern adaptive SMO management. They target orthogonal sources of overhead and can be tuned independently. A set of secondary compile-time and runtime parameters control the WAL, batching, and reclaim subsystems.</div>
+
+      <div class="two">
+        <div class="knob">
+          <div class="knob-title">σ — path-stability threshold</div>
+          <div class="knob-body">
+            Bounds routing-path imbalance in the DRAM main index before local rebalancing is triggered.<br><br>
+            Larger σ → fewer SMOs, more routing work per op.<br>
+            Smaller σ → tighter balance, more frequent restructuring.
+            <span class="knob-formula">Cost_defer(σ) ≈ c_search·σ + c_smo/σ</span>
+            Balanced point: <code style="font-family:var(--mono);font-size:13px;color:#c9d1d9;">σ̄ = 1.60</code> (L0=3.0, L1=2.0, L2+=1.0)
+          </div>
+        </div>
+        <div class="knob">
+          <div class="knob-title">δ — shadow-divergence threshold</div>
+          <div class="knob-body">
+            Bounds structural lag between DRAM main index and PMEM shadow index before checkpointing is forced.<br><br>
+            Larger δ → more batching, fewer checkpoints, worse post-crash search.<br>
+            Smaller δ → closer shadow tracking, more frequent flushes.
+            <span class="knob-formula">Cost_flush(δ) ≈ c_persist/δ + c_search·δ</span>
+            Recommended range: <code style="font-family:var(--mono);font-size:13px;color:#c9d1d9;">1.1 – 1.5</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="knob" style="margin-top:.75rem;">
+        <div class="knob-title">m — noise-rejection margin</div>
+        <div class="knob-body">
+          Bounds mis-speculation by gating SGP allocation on predicted insert pressure. Speculation fires only when predicted pressure exceeds available routing capacity by at least a factor of m (m ≥ 1).<br><br>
+          Larger m → fewer false positives, slower hotspot response.<br>
+          Smaller m → faster reaction, more wasted SGPs on noise.
+          <span class="knob-formula">Cost_spec(m) ≈ c_link/m + c_waste·(1/m)·noise</span>
+          Default: <code style="font-family:var(--mono);font-size:13px;color:#c9d1d9;">m = 2</code>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Combined cost model</div>
+        <div class="code">Cost(m, σ, δ) ≈ Cost_spec(m)      // mis-speculation overhead
+               + Cost_defer(σ)    // search-path inflation
+               + Cost_flush(δ)    // persistence overhead</div>
+        <div class="card-body">The three knobs target orthogonal sources of overhead. Their combined effect is approximately additive under steady-state workloads.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">σ — per-level stability coefficients</div>
+        <div class="card-body" style="margin-top:4px;">
+          The stability threshold is not a single global value — it is a per-level array that controls how many child vNodes a single GP may cover before triggering a reactive SMO. Imbalance is checked at the <em>individual GP level</em>: <code style="font-family:var(--mono);font-size:14px;">gp_covered[i] > coeff[level]</code>.
+        </div>
+        <div class="code" style="margin-top:8px;">// common.h — ENABLE_COEFF_ONE=1 (default)
+SEARCH_STABILITY_COEFFICIENT_BY_LEVEL[20] = {
+    3, 2,                           // L0, L1: leaf-adjacent, absorb more splits
+    1, 1, 1, 1, 1, 1, 1, 1,        // L2+: upper levels, tight balance (1 child/GP max)
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };</div>
+        <div class="card-body" style="margin-top:4px;">
+          Two configurations are provided via the <code style="font-family:var(--mono);font-size:14px;">ENABLE_COEFF_ONE</code> build flag. When disabled, GP/SGPs can only reference one child node. When enabled (default),certain level iNodes can cover multiple child nodes with allowance restricting gradually the higher we go through the index — meaning upper levels tolerate almost no imbalance and split aggressively.
+        </div>
+      </div> 
+<!--
+      <div class="card">
+        <div class="card-title">Speculation tuning parameters</div>
+        <div class="card-body" style="margin-top:4px;">Fine-grained knobs that control the speculation pipeline's sensitivity and resource usage:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">inserts_per_anchor = 10</span><span class="api-desc">Predicted inserts needed to justify one SGP. Lower values create more SGPs (more aggressive speculation).</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">max_per_node = 8</span><span class="api-desc">Maximum SGP anchors placed per iNode per speculation round.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">future_epochs = 1</span><span class="api-desc">Forecast horizon — how many future epochs of inserts to extrapolate.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">window_buckets = 20</span><span class="api-desc">Sliding-window width for hotspot detection (20 of 100 histogram bins).</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">MIN_INODE_PRED = 0.05</span><span class="api-desc">Noise floor — iNodes with predicted inserts below this are skipped.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">MAX_ANCHORS_PER_INODE = 16</span><span class="api-desc">Hard cap on anchors per iNode (overrides inserts_per_anchor calculation).</span></div>
+        </div>
+      </div> -->
+
+      <div class="card">
+        <div class="card-title">δ — divergence detection mechanism</div>
+        <div class="card-body" style="margin-top:4px;">
+          The divergence threshold is evaluated by comparing the expected search cost on the PMEM shadow index against the DRAM main index. Both use the same formula:
+        </div>
+        <div class="code" style="margin-top:8px;">E_search = E_index + E_data
+
+E_index = 1 + Σ(fanout_i / 2)      // expected iNode hops (top → bottom)
+E_data  = V_total / (2 · N_L0)     // expected vNode chain hops at leaf level
+
+divergence = E_search_pmem / E_search_dram
+reclaim triggers when: divergence > DIVERGENCE_THRESHOLD</div>
+        <div class="card-body" style="margin-top:4px;">
+          The PMEM search efficiency uses the <em>last checkpointed</em> iNode counts per level, while the DRAM version uses the live counts. As the DRAM index absorbs splits and rebalances without checkpointing, the PMEM index falls behind — its expected search cost rises. When the ratio exceeds δ, reclaim drains the WAL to bring the shadow index up to date.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Reclaim modes</div>
+        <div class="card-body" style="margin-top:4px;">The reclaim subsystem that applies WAL entries to the PMEM shadow index has two compile-time modes:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent2);">DT-only (default)</span><span class="api-desc">Divergence threshold is the sole reclaim trigger. A WAL high-watermark (75% capacity) acts as a safety net to prevent ring-buffer overflow. When DT is violated, all durable bytes are drained in one burst.</span></div>
+          <!--<div class="api-row"><span class="api-name" style="min-width:180px;color:#6eb5f5;">3-condition gate</span><span class="api-desc">Original mode: reclaim fires when <em>any</em> of three conditions is met — WAL queue size exceeds <code style="font-family:var(--mono);font-size:14px;">RECLAIM_THRESHOLD</code>, retry count exceeds limit, or divergence exceeds δ.</span></div> -->
+          <div class="api-row"><span class="api-name" style="min-width:180px;color:var(--accent3);">Sync reclaim</span><span class="api-desc">Foreground-driven: the insert thread that trips DT becomes the reclaim leader via <code style="font-family:var(--mono);font-size:14px;">try_lock</code>. Other writers skip past (non-blocking). The flush thread is paused while reclaim runs. [used for ablation]</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">WAL &amp; batching parameters</div>
+        <div class="card-body" style="margin-top:4px;">Compile-time and runtime constants controlling the WAL ring buffer and per-thread log batching:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">MAX_CKP_LOG_ENTRIES = 64 MB</span><span class="api-desc">WAL ring buffer capacity (power of two, masked addressing).</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">RECLAIM_BATCH_BYTES = 256 KB</span><span class="api-desc">Maximum bytes replayed per reclaim batch (default = PERSISTENT_THRESHOLD).</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">WAL_HIGH_WATERMARK = 75%</span><span class="api-desc">Emergency reclaim trigger to prevent ring overflow.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">DIVERGENCE_THRESHOLD = 1.10</span><span class="api-desc">Default δ value — 10% search cost inflation before reclaim fires.</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px;">Per-thread batching coalesces individual log writes into bulk WAL appends:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:#6eb5f5;">Batcher.kMaxEntries = 4096</span><span class="api-desc">Flush when the batch accumulates this many log events.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:#6eb5f5;">Batcher.kMaxBytes = 4 MB</span><span class="api-desc">Flush when the batch reaches this estimated byte size.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:#6eb5f5;">Batcher.kMaxDelayNs = 2 ms</span><span class="api-desc">Flush when 2 ms have elapsed since the last flush (latency cap).</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">WAL record types</div>
+        <div class="card-body" style="margin-top:4px;">Three record types trade off compactness vs. replay simplicity:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:120px;"><span class="tag tag-o" style="font-size:12px;">FULL</span></span><span class="api-desc">Complete iNode snapshot — all routing slots, values, and covered counts. Used after any structural change that modifies multiple slots. Safe to replay idempotently.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:120px;"><span class="tag tag-p" style="font-size:12px;">DELTA</span></span><span class="api-desc">Patches individual slots in-place. Used for Path C (<code style="font-family:var(--mono);font-size:14px;">linkInactiveSGP()</code>). Much smaller than FULL — only carries changed slot(s) plus metadata header.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:120px;"><span class="tag tag-t" style="font-size:12px;">INSERT</span></span><span class="api-desc">Compact insert-delta: records a single GP insertion at a given position. Recovery shifts <code style="font-family:var(--mono);font-size:14px;">slots[pos..last]</code> right by 1, then writes the new slot.</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Checkpointing mechanics</div>
+        <div class="card-body" style="margin-top:4px;">
+          Each SMO redo log entry carries a fixed header <code style="font-family:var(--mono);font-size:14px;">(iNode-ID, SMO-type)</code> and a type-specific payload. Once the in-memory SMO completes, the redo record is appended to the WAL via the per-thread <code style="font-family:var(--mono);font-size:14px;">Batcher</code>. Four atomic cursors manage the ring buffer lifecycle:
+        </div>
+        <div style="margin-top:10px; background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:14px 16px; overflow-x:auto;">
+          <div style="font-family:var(--mono); font-size:15px; color:#d0d7de; white-space:nowrap; line-height:1.4;">
+            <span style="color:#e6edf3;">a_consumed_start</span>
+            <span style="color:#8b949e; margin:0 10px;">──→</span>
+            <span style="color:#e6edf3;">a_durable_end</span>
+            <span style="color:#8b949e; margin:0 10px;">──→</span>
+            <span style="color:#e6edf3;">a_produced_end</span>
+            <span style="color:#8b949e; margin:0 10px;">──→</span>
+            <span style="color:#e6edf3;">a_alloc_end</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(4, minmax(170px, 1fr)); gap:14px; margin-top:12px; min-width:760px; font-family:var(--mono);">
+            <div style="border-left:2px solid #3d444d; padding-left:10px;">
+              <div style="font-size:14px; color:#7ee787;">reclaimable</div>
+              <div style="font-size:13px; color:#8b949e; margin-top:4px;">(apply to PMEM)</div>
+            </div>
+            <div style="border-left:2px solid #3d444d; padding-left:10px;">
+              <div style="font-size:14px; color:#79c0ff;">flushable</div>
+              <div style="font-size:13px; color:#8b949e; margin-top:4px;">(CLWB pending)</div>
+            </div>
+            <div style="border-left:2px solid #3d444d; padding-left:10px;">
+              <div style="font-size:14px; color:#e3b341;">being written</div>
+              <div style="font-size:13px; color:#8b949e; margin-top:4px;">(partially done)</div>
+            </div>
+            <div style="border-left:2px solid #3d444d; padding-left:10px;">
+              <div style="font-size:14px; color:#f2cc60;">reserved region</div>
+              <div style="font-size:13px; color:#8b949e; margin-top:4px;">(allocated, not produced)</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body" style="margin-top:4px;">
+          A background flush thread advances <code style="font-family:var(--mono);font-size:14px;">a_durable_end</code> by issuing CLWB+SFENCE on produced entries. A separate reclaim thread (or foreground sync reclaim) advances <code style="font-family:var(--mono);font-size:14px;">a_consumed_start</code> by replaying durable entries to the PMEM shadow index. Strict propagation order: child nodes are persisted before parent pointers are updated — ensuring even a partially checkpointed shadow index remains safely traversable.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Build-time feature flags</div>
+        <div class="card-body" style="margin-top:4px;">Key compile-time flags that change system behavior (set via <code style="font-family:var(--mono);font-size:14px;">make FLAG=value</code>):</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">ENABLE_SGP </span><span class="api-desc">Master switch for speculative guideposts. Disabling removes the entire speculation pipeline.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">ENABLE_COEFF_ONE </span><span class="api-desc">Tighter stability: split after 1 child.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">ENABLE_SYNC_RECLAIM </span><span class="api-desc">Foreground sync reclaim. When 1, the insert thread drives reclaim (no background merge thread).</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">ENABLE_LOG_REPLAY </span><span class="api-desc">Enables WAL replay on recovery. When 0, only stale-shadow mode is available.</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:240px;color:var(--accent2);">ENABLE_IMMEDIATE_FLUSH </span><span class="api-desc">When 1, flushes each log entry immediately (no background flush thread). For debugging.</span></div>
+        </div>
+      </div>
+    </div>
+
+        <!-- RECOVERY -->
+    <div id="recovery" class="section">
+      <div class="sec-title">Recovery</div>
+      <div class="sec-desc">TandemKV prioritizes immediate availability over exhaustive reconstruction. The recovered index is structurally stale but semantically complete — all committed records remain reachable.</div>
+
+      <div class="card">
+        <div class="card-title">Recovery invariants</div>
+        <div class="inv-row" style="margin-top:4px;"><span class="inv-num">1</span><span class="card-body">Routing correctness — all traversal paths remain valid; every committed record is reachable from the recovered index</span></div>
+        <div class="inv-row"><span class="inv-num">2</span><span class="card-body">Bounded search-path inflation — post-crash search depth exceeds the last checkpoint depth by at most δ</span></div>
+      </div>
+
+      <div class="two">
+        <div class="mode mode-instant">
+          <div class="mode-title">Stale-shadow mode (default)</div>
+          <div class="mode-body">Memory-maps the last checkpoint and immediately begins serving requests. SMOs recorded in the redo log after the last checkpoint are absent from the recovered index.<br><br>Recovery time: ~0s. Post-crash search initially degraded by at most δ.<br><br>When adaptive replay is enabled, a background thread monitors post-restart write activity. If writes are flowing, the index self-heals through splits and rebalancing. If no writes are detected for a configurable quiet period, the thread lazily replays the WAL in bounded chunks, refreshing the DRAM index incrementally until the log is drained and the thread exits.</div>
+        </div>
+        <div class="mode mode-replay">
+          <div class="mode-title">Log-replay mode</div>
+          <div class="mode-body">Before serving requests, replays the persistent SMO redo log to reconstruct the index state at the crash point. Longer restart time, better post-crash search quality.<br><br>Recovery time: 0.05s (δ≈1.01) to 1.65s (δ≈10.0). Preferred when post-crash latency matters more than restart time.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Recovery procedure (stale-shadow)</div>
+        <div class="code">// recoveryManager.cpp — RecoveryManager::recoveryOperation()
+FUNCTION recoveryOperation()
+    superNode = pmemInodePool[MAX_NODES - 1]       // persistent metadata sentinel
+    IF superNode.next != 0:
+        memcpyToDRAM(dramPool, pmemPool, sizeof(Inode) * last_index)
+        FOR EACH inode with odd seqlock version:   // mid-write at crash time
+            bump version to next even value        // unblock reader spin-waits
+    RETURN superNode.level
+END FUNCTION</div>
+        <div class="flow" style="margin-top:6px;">
+          <span class="fstep">re-map PMEM pool</span><span class="farr">→</span>
+          <span class="fstep">copy shadow image → DRAM</span><span class="farr">→</span>
+          <span class="fstep">fix odd seqlocks</span><span class="farr">→</span>
+          <span class="fstep">reload runtime metadata</span><span class="farr">→</span>
+          <span class="fstep">serve requests</span>
+        </div>
+        <div class="card-body">No pointer swizzling, no address translation, no index rebuild. Lightweight runtime metadata (skiplist height, node-allocation counters) is flushed periodically to PMEM and reloaded on restart via the <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">SuperNode</code> sentinel at <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">pmemInodePool[MAX_NODES - 1]</code>.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">WAL ring buffer</div>
+        <div class="card-body" style="margin-top:4px;">The SMO redo log is a persistent ring buffer on NVM managed by four atomic cursors:</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_consumed_start</span><span class="api-desc">Oldest entry not yet applied to pmem inodes — the replay frontier</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_alloc_end</span><span class="api-desc">Allocation frontier — may contain partially written entries</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_produced_end</span><span class="api-desc">Fully written entries, ready for CLWB</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:160px;color:var(--accent2);">a_durable_end</span><span class="api-desc">Flushed and fence-ordered — safe to replay after crash</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px;">Cursor positions are persisted in a <code style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.875em; background: rgba(175,184,193,0.2); border: 1px solid rgba(175,184,193,0.3); border-radius: 4px; padding: 2px 6px;">CkptLogPersistMeta</code> struct on NVM, guarded by a magic constant to distinguish valid recovery state from uninitialized memory. Two record types: <span class="tag tag-t">FULL</span> overwrites an entire pmem inode, <span class="tag tag-p">DELTA</span> patches individual GP slots in-place.</div>
+        <div class="code" style="margin-top:8px;">// ckpt_log.cpp — replayLog()
+FUNCTION replayLog(pmemInodePool)
+    consumed = a_consumed_start
+    durable  = a_durable_end
+    IF consumed >= durable: RETURN          // nothing to replay
+
+    FOR EACH record IN WAL[consumed .. durable):
+        IF record.type == FULL:
+            overwrite pmemInodePool[record.inode_id]  // full snapshot
+        ELSE IF record.type == DELTA:
+            FOR EACH slot IN record.entries:
+                patch pmemInodePool[record.inode_id].gp[slot]
+    advance a_consumed_start
+END FUNCTION</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Adaptive replay (stale-shadow extension)</div>
+        <div class="card-body" style="margin-top:4px;">Writes naturally converge the index: each insert may trigger splits, GP creation, and rebalancing that overwrite the stale post-crash routing state. WAL replay is only necessary when writes stop flowing and the degraded DRAM index remains stuck.</div>
+        <div class="code" style="margin-top:8px;">// tandemIndex.cpp — adaptiveReplayThreadExec()
+FUNCTION adaptiveReplayThread()
+    quiet_epochs = 0
+    WHILE WAL has pending entries:
+        sleep(SAMPLE_WINDOW)
+        writes = atomic_exchange(op_write_count, 0)
+        IF writes > 0:
+            quiet_epochs = 0            // index self-healing via live traffic
+            CONTINUE
+        quiet_epochs++
+        IF quiet_epochs < IDLE_EPOCHS:
+            CONTINUE
+        // No writes for IDLE_EPOCHS — index is stuck, replay a chunk
+        lazyReplayStep(WAL, BATCH_BYTES)
+        memcpyToDRAM(dramPool, pmemPool)  // refresh DRAM so reads benefit
+        yield(LAZY_YIELD_US)
+    THREAD EXITS                          // WAL drained — no residual polling
+END FUNCTION</div>
+        <div style="margin-top:8px;">
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">SAMPLE_WINDOW_MS = 500</span><span class="api-desc">Epoch length for write-activity sampling</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">IDLE_EPOCHS = 6</span><span class="api-desc">Consecutive quiet epochs before lazy replay (default: 3 s)</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">LAZY_BATCH_BYTES = 256 KB</span><span class="api-desc">Maximum bytes replayed per step</span></div>
+          <div class="api-row"><span class="api-name" style="min-width:200px;color:var(--accent2);">LAZY_YIELD_US = 200</span><span class="api-desc">Inter-batch yield to limit foreground interference</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Post-crash convergence</div>
+        <div class="card-body">The same path-stability metrics used during normal execution continue to fire after recovery. Structural gaps from missing SMOs are repaired incrementally as live traffic triggers reactive and proactive SMOs — without any recovery-specific restructuring. Under typical deployments (δ = 1.1–1.5), the latency overhead is small and often negligible under read-dominated workloads. With adaptive replay enabled, write-active workloads self-heal while read-only workloads converge via background WAL drain within seconds.</div>
+      </div>
+    </div>
+
+
+    
+
+
+    <!-- EVALUATION -->
+    <div id="eval" class="section">
+      <div class="sec-title">Evaluation</div>
+      <div class="sec-desc">TandemKV is evaluated against four state-of-the-art durable KV stores across the full YCSB suite (uniform and Zipfian), plus ablation, runtime search stability, divergence-threshold sweep, and crash-recovery experiments.</div>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">dataset</div><div class="stat-val">100M KV</div></div>
+        <div class="stat"><div class="stat-label">key / value</div><div class="stat-val">8 B / 8 B</div></div>
+        <div class="stat"><div class="stat-label">DRAM</div><div class="stat-val">160 GB</div></div>
+        <div class="stat"><div class="stat-label">PMEM</div><div class="stat-val">256 GB</div></div>
+        <div class="stat"><div class="stat-label">CPU cores</div><div class="stat-val">32</div></div>
+        <div class="stat"><div class="stat-label">PMEM read BW</div><div class="stat-val">6.6 GB/s</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Four evaluation questions</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5;">Q1 · Runtime</span><span class="api-desc">Throughput, latency, and scalability across the full YCSB suite vs. Prism, FluidKV, ListDB, DPTree</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);">Q2 · Ablation</span><span class="api-desc">How each mechanism (speculative, deferred, group-commit) contributes to reducing SMOs and improving throughput</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3);">Q3 · Stability</span><span class="api-desc">How deferred SMOs and divergence-guided persistence affect the checkpointing / recovery trade-off</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff;">Q4 · Recovery</span><span class="api-desc">How quickly TandemKV resumes service after a crash and how closely post-recovery tracks pre-crash performance</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Baselines</div>
+        <div style="margin-top:4px;">
+          <div class="baseline-row"><span class="baseline-name">Prism</span><span class="baseline-desc">Fully durable; both data and index on PMEM; eager synchronous SMO logging; instant restart without reconstruction</span></div>
+          <div class="baseline-row"><span class="baseline-name">FluidKV</span><span class="baseline-desc">Hybrid LSM; memtable in DRAM backed by WAL; flushed to PMEM; recovery by log replay</span></div>
+          <div class="baseline-row"><span class="baseline-name">DPTree</span><span class="baseline-desc">Two-level DRAM–PMEM; writes buffered in DRAM buffer tree; periodically merged into PMEM base tree</span></div>
+          <div class="baseline-row"><span class="baseline-name">ListDB</span><span class="baseline-desc">LSM with Index-Unified Logging; lazily converts WAL entries into skiplist elements; in-place zipper compaction</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">YCSB workloads</div>
+        <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="tag tag-g">Load — 100% W</span>
+          <span class="tag tag-g">A — 50% R / 50% W</span>
+          <span class="tag tag-g">B — 95% R / 5% W</span>
+          <span class="tag tag-g">C — 100% R</span>
+          <span class="tag tag-g">D — 95% R / 5% W (latest)</span>
+          <span class="tag tag-g">E — 95% scan / 5% W</span>
+        </div>
+        <div class="card-body" style="margin-top:8px;">Both uniform (θ=0) and Zipfian skewed (θ=0.99). Thread counts: 1, 4, 8, 16, 32. Default σ̄ = 1.60, δ = 1.1. Two background checkpoint threads, NUMA-pinned to the local PMEM socket.</div>
+      </div>
+
+      <!-- Q1: RUNTIME PERFORMANCE -->
+      <div class="card">
+        <div class="card-title"><span style="color:#6eb5f5;">Q1 ·</span> Runtime performance across YCSB</div>
+        <div class="card-body" style="margin-top:4px;">
+          Under sustained insert pressure, deferred SMOs keep structural maintenance off the critical path, so TandemKV's throughput scales cleanly with thread count on both uniform and Zipfian Load. Prism's fully-durable path serializes on synchronous metadata logging; ListDB's WAL-centric design serializes structural updates; FluidKV and DPTree saturate once cross-layer flush / merge overhead dominates. On read-heavy workloads, TandemKV trades a small, σ-bounded increase in search depth for substantially better write efficiency; on mixed workloads (A / B / D) it stays ahead at high thread counts because speculative SMOs absorb hotspot pressure before it becomes critical-path work. On range scan (E), the contiguous vNode layout gives strong spatial locality and predictable prefetching.
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:.6rem; margin-top:12px;">
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#79c0ff; font-weight:500;">7.4<span style="font-size:13px; color:#8b949e; margin-left:4px;">µs</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Load latency (vs. Prism 23.3 µs, FluidKV 39.2 µs) @ 16T Zipfian</div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#7ee787; font-weight:500;">4.0<span style="font-size:13px; color:#8b949e; margin-left:4px;">µs</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">YCSB-A latency (vs. Prism 8.5 µs) @ 16T Zipfian</div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#e3b341; font-weight:500;">smooth</div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">PM bandwidth decoupled from structural events — no synchronous-flush spikes</div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px;">
+            <div style="font-family:var(--mono); font-size:20px; color:#d2a8ff; font-weight:500;">1→32<span style="font-size:13px; color:#8b949e; margin-left:4px;">threads</span></div>
+            <div style="font-size:13px; color:#8b949e; margin-top:4px; line-height:1.4;">Near-linear scaling on Load / C / A where baselines saturate or regress</div>
+          </div>
+        </div>
+        <div class="card-body" style="margin-top:10px; font-size:14.5px;">
+          <span style="color:var(--accent3); font-family:var(--mono);">Why baselines stall.</span> Prism issues OpLog flushes on every SMO — throughput dips and latency spikes align with flush epochs. FluidKV oscillates with background consolidation. ListDB's Index-Unified Logging must convert WAL entries into skiplist elements before updates land, capping write parallelism. DPTree absorbs writes in a DRAM buffer but stalls during periodic merges into the PMEM base tree.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Memory consumption (100M KV, 16 B pairs)</div>
+        <div class="card-body" style="margin-top:4px;">Compact redo-log metadata and append-only vNode layout give TandemKV the smallest NVM footprint. Its DRAM footprint stays moderate: adaptive SMOs bound main-index growth, the Bloom-filter cache is size-bounded and scoped to hot vNodes, and hotspot detection uses coarse-grained sampling rather than per-op tracking.</div>
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-family:var(--mono); font-size:14px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border2);">
+                <th style="text-align:left; padding:8px 10px; color:var(--muted); font-weight:500;">System</th>
+                <th style="text-align:right; padding:8px 10px; color:var(--muted); font-weight:500;">DRAM (GB)</th>
+                <th style="text-align:right; padding:8px 10px; color:var(--muted); font-weight:500;">NVM (GB)</th>
+                <th style="text-align:left; padding:8px 10px; color:var(--muted); font-weight:500;">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border);"><td style="padding:7px 10px; color:#9ca3af;">Prism</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">3.21</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">6.90</td><td style="padding:7px 10px; color:#9ca3af; font-family:var(--sans); font-size:13px;">no reclamation; all KV pairs on OpLog</td></tr>
+              <tr style="border-bottom:1px solid var(--border);"><td style="padding:7px 10px; color:#9ca3af;">FluidKV</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">3.18</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">4.80</td><td style="padding:7px 10px; color:#9ca3af; font-family:var(--sans); font-size:13px;">versioned data across LSM levels</td></tr>
+              <tr style="border-bottom:1px solid var(--border);"><td style="padding:7px 10px; color:#9ca3af;">ListDB</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">4.56</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">3.80</td><td style="padding:7px 10px; color:#9ca3af; font-family:var(--sans); font-size:13px;">memtables + lookup cache in DRAM</td></tr>
+              <tr style="border-bottom:1px solid var(--border);"><td style="padding:7px 10px; color:#9ca3af;">DPTree</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">2.32</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">4.39</td><td style="padding:7px 10px; color:#9ca3af; font-family:var(--sans); font-size:13px;">buffer + base tree metadata on PMEM</td></tr>
+              <tr><td style="padding:7px 10px; color:var(--accent2); font-weight:500;">TandemKV</td><td style="padding:7px 10px; text-align:right; color:var(--accent2); font-weight:500;">3.65</td><td style="padding:7px 10px; text-align:right; color:var(--accent2); font-weight:500;">2.36</td><td style="padding:7px 10px; color:#9ca3af; font-family:var(--sans); font-size:13px;">smallest NVM footprint of all five systems</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Q2: ABLATION -->
+      <div class="card">
+        <div class="card-title"><span style="color:var(--accent2);">Q2 ·</span> Ablation — where does the win come from?</div>
+        <div class="card-body" style="margin-top:4px;">
+          We start from a <em>Base</em> configuration and progressively add <strong>G</strong>roup-commit, <strong>D</strong>eferred SMOs, and <strong>S</strong>peculative SMOs. The total number of structural events required to index a fixed trace barely moves (≈ 2.28 M for Load, ≈ 530 K for YCSB-A) — what changes is the <em>composition</em> of those events: TandemKV shifts work away from expensive on-path iNode splits and reactive GP activations toward proactive SGP linking and inserts absorbed by existing routing capacity.
+        </div>
+        <div style="margin-top:10px;">
+          <div class="ablation-row"><span class="ablation-key">Base</span><span class="ablation-desc">Every SMO synchronously persisted on the critical path — 100% reactive</span><span class="ablation-result">baseline</span></div>
+          <div class="ablation-row"><span class="ablation-key">Base+G</span><span class="ablation-desc">Group commit coalesces redo-log persistence into batched commits</span><span class="ablation-result">+57% throughput</span></div>
+          <div class="ablation-row"><span class="ablation-key">Base+D</span><span class="ablation-desc">Deferred SMOs: reactive share 100% → 39%; 61% of inserts land within existing GPs</span><span class="ablation-result">−20% write vol.</span></div>
+          <div class="ablation-row"><span class="ablation-key">Base+S</span><span class="ablation-desc">Speculative SMOs: 55% of structural work becomes proactive SGP linking under Load</span><span class="ablation-result">−41% write vol.</span></div>
+          <div class="ablation-row"><span class="ablation-key">Base+SD</span><span class="ablation-desc">S eliminates reactive splits; D absorbs remaining pressure into existing iNodes</span><span class="ablation-result">−50% write vol.</span></div>
+          <div class="ablation-row"><span class="ablation-key">Full (S+D+G)</span><span class="ablation-desc">Proactive + avoided SMOs = 83% of structural work; best throughput and I/O</span><span class="ablation-result">top configuration</span></div>
+        </div>
+        <div class="card-body" style="margin-top:10px; font-size:14.5px;">
+          <span style="color:var(--accent3); font-family:var(--mono);">Complementarity.</span> G relaxes <em>when</em> SMOs persist; D relaxes <em>whether</em> each pressure event becomes a split; S relaxes <em>when</em> routing capacity appears relative to demand. Their effects compose: S pushes work from reactive → proactive, D pushes it from proactive → avoided, G amortises the persistence cost of what remains. SGP link rate is 45% under Load and 38% under YCSB-A — low but still worthwhile because discarding an unused SGP is cheap while an avoided critical-path split is expensive.
+        </div>
+      </div>
+
+      <!-- Q3: RUNTIME SEARCH STABILITY -->
+      <div class="card">
+        <div class="card-title"><span style="color:var(--accent3);">Q3 ·</span> Runtime search stability — main vs. shadow</div>
+        <div class="card-body" style="margin-top:4px;">
+          Under a continuous YCSB-A workload with δ = 1.2, the two indexes trace two deliberately different curves. The DRAM main index evolves smoothly as local splits accumulate at the pace the workload demands. The PMEM shadow index follows a <em>sawtooth</em>: flat between checkpoints, then snapping back to parity when divergence-guided checkpointing reconciles accumulated redo-log entries in a batch. This is the design point — the main index optimises for live search quality while the shadow index stays logically consistent and recovery-ready, with each checkpoint amortising the cost of all deferred SMOs in between.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Divergence-threshold sweep (δ)</div>
+        <div class="card-body" style="margin-top:4px;">
+          We vary δ from 1.01 (near-synchronous checkpointing) to 10.0 (highly relaxed) under a 16-thread Zipfian bulk-load. Two trends appear clearly: checkpoint frequency collapses as δ grows, while log-replay recovery latency grows monotonically with the amount of deferred structural state. Between them, steady-state throughput rises as fewer checkpoints leave more PMEM bandwidth for foreground operations.
+        </div>
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-family:var(--mono); font-size:14px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border2);">
+                <th style="text-align:left; padding:8px 10px; color:var(--muted); font-weight:500;">δ</th>
+                <th style="text-align:right; padding:8px 10px; color:var(--muted); font-weight:500;">Checkpoints</th>
+                <th style="text-align:right; padding:8px 10px; color:var(--muted); font-weight:500;">Recovery (replay)</th>
+                <th style="text-align:right; padding:8px 10px; color:var(--muted); font-weight:500;">Throughput</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border);"><td style="padding:7px 10px; color:#9ca3af;">1.01</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">~84 K</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">0.05 s</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">1.93 Mops/s</td></tr>
+              <tr style="border-bottom:1px solid var(--border); background:rgba(79,196,160,.04);"><td style="padding:7px 10px; color:var(--accent2);">1.10 ✦</td><td style="padding:7px 10px; text-align:right; color:var(--accent2)">~38 K</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">0.44 s</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">2.63 Mops/s</td></tr>
+              <tr style="border-bottom:1px solid var(--border); background:rgba(79,196,160,.04);"><td style="padding:7px 10px; color:var(--accent2);">1.20 ✦</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">~21 K</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">0.63 s</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">2.69 Mops/s</td></tr>
+              <tr style="border-bottom:1px solid var(--border); background:rgba(79,196,160,.04);"><td style="padding:7px 10px; color:var(--accent2);">1.50 ✦</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">~7 K</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">0.96 s</td><td style="padding:7px 10px; text-align:right; color:var(--accent2);">2.74 Mops/s</td></tr>
+              <tr><td style="padding:7px 10px; color:#9ca3af;">10.0</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">~6.9 K</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">1.65 s</td><td style="padding:7px 10px; text-align:right; color:#e8e9eb;">2.88 Mops/s</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-body" style="margin-top:10px; font-size:14.5px;">
+          <span style="color:var(--accent3); font-family:var(--mono);">Recommended region.</span> δ ∈ [1.1, 1.5] captures the knee: checkpoint frequency is substantially lower than at δ = 1.01, throughput has recovered most of its headroom, and log-replay stays under a second. Beyond δ = 1.5 the return diminishes — checkpoint count plateaus near 7 K while recovery cost keeps climbing.
+        </div>
+      </div>
+
+      <!-- Q4: RECOVERY BEHAVIOR -->
+      <div class="card">
+        <div class="card-title"><span style="color:#d2a8ff;">Q4 ·</span> Recovery behavior — two modes</div>
+        <div class="card-body" style="margin-top:4px;">
+          The operator picks a recovery mode that matches their latency budget. In both cases the shadow image itself is reused directly — no pointer swizzling, no tree rebuild — because internal references are relative offsets in symmetric virtual-address regions.
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem; margin-top:12px;">
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:14px;">
+            <div style="font-family:var(--mono); color:#7ee787; font-size:14px; margin-bottom:6px;">stale-shadow (default)</div>
+            <div style="font-size:14.5px; color:#9ca3af; line-height:1.6;">Memory-map the most recent checkpoint and start serving immediately. Any uncheckpointed SMOs show up as slightly longer search paths until live traffic repairs them incrementally through the same σ-driven mechanism used during normal execution.</div>
+            <div style="font-family:var(--mono); font-size:13px; color:var(--accent2); margin-top:8px;">recovery ≈ 0 s</div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:14px;">
+            <div style="font-family:var(--mono); color:#79c0ff; font-size:14px; margin-bottom:6px;">log-replay</div>
+            <div style="font-size:14.5px; color:#9ca3af; line-height:1.6;">Replay the persistent SMO redo log to close the structural gap before serving. Bounded by the size of the log since the last checkpoint — not by an index rebuild — so it scales with δ rather than with dataset size.</div>
+            <div style="font-family:var(--mono); font-size:13px; color:#79c0ff; margin-top:8px;">recovery 0.05 s → 1.65 s (δ 1.01 → 10)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Post-crash search stability &amp; convergence</div>
+        <div class="card-body" style="margin-top:4px;">
+          After stale-shadow recovery, any SMOs that fell between the last checkpoint and the crash appear as occasional 10–12 µs latency spikes on sampled queries — only at large δ. Inside the recommended region (δ ≤ 1.20) the spikes are effectively invisible. Recovery itself performs <em>no</em> restructuring: the same path-stability metrics used during normal execution continue to fire under live traffic, and each touched path is repaired as soon as a subsequent write reaches it. What takes time is not convergence <em>per path</em> but retiring the full set of deferred paths, which is governed by how quickly writes cover them.
+        </div>
+      </div>
+    </div>
+
+    <!-- IMPLEMENTATION -->
+    <div id="impl" class="section">
+      <div class="sec-title">Implementation</div>
+      <div class="sec-desc">TandemKV is written in C++17 (~11K lines across <code style="font-family:var(--mono);">src/</code> + <code style="font-family:var(--mono);">include/</code>) on Intel PMDK. The codebase is organised around a small set of cooperating modules: the DRAM main index, the PMEM shadow pools, the checkpoint redo log, the speculative hotspot detector, and a handful of background threads.</div>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">language</div><div class="stat-val">C++17</div></div>
+        <div class="stat"><div class="stat-label">codebase</div><div class="stat-val">~11K LoC</div></div>
+        <div class="stat"><div class="stat-label">PMEM lib</div><div class="stat-val">PMDK</div></div>
+        <div class="stat"><div class="stat-label">hardware</div><div class="stat-val">Optane / CMM-H</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Module map</div>
+        <div class="card-body" style="margin-top:4px;">Five functional groups, each isolated behind a small header; most compile-time behaviour can be toggled without touching the others.</div>
+        <div style="margin-top:10px;">
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">tandemIndex </span><span class="api-desc">Top-level engine: <code style="font-family:var(--mono);">insert / update / lookup / scan</code>; dispatches to the DRAM main index, schedules SGP activation, and owns the background threads</span></div>
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">dramSkiplist, dramInodePool</span><span class="api-desc">DRAM-resident main index: hierarchical skiplist of wide iNodes, backed by a contiguous <code style="font-family:var(--mono);">Inode[MAX_NODES]</code> array where each node's <code style="font-family:var(--mono);">int32_t id</code> equals its array index</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2); min-width:230px;">pmemInodePool, pmemVnodePool</span><span class="api-desc">PMEM shadow index and value storage — identical ID-indexed layout as the DRAM pool, so internal references (stored as integer IDs) resolve into either pool without pointer swizzling</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2); min-width:230px;">pmemBFPool + hotBloomCache</span><span class="api-desc">PMEM-resident Bloom filters per vNode + size-bounded DRAM cache with CLOCK eviction and SGP-driven hot promotion</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">ckpt_log, checkpoint</span><span class="api-desc">Persistent SMO redo log (default 64 MB ring) with full / delta / insert entry formats; drives divergence-guided group-committed checkpoints</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">insert_tracker</span><span class="api-desc">Epoch-based hotspot detector — reservoir-sampled equi-depth histogram, frozen every ~1 K vNode splits, used to forecast SGP slot demand</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">recoveryManager, valuelist</span><span class="api-desc">Stale-shadow / log-replay recovery paths; value-node chain management and reclamation</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">workerThread, workload_tandem</span><span class="api-desc">Background worker primitives (log flush, log merge, rebalance) and the YCSB-compatible benchmark driver</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Core data structures</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name">Inode</span><span class="api-desc">64-B-aligned internal routing node with fanout 64 — holds GPs + SGP slots and a per-node visibility bitmap; SGP linking toggles one bit (no metadata rewrite)</span></div>
+          <div class="api-row"><span class="api-name">Vnode</span><span class="api-desc">Append-only value node with fanout 63 — favours write speed over ordered search; compensated by Bloom + fingerprint lookup</span></div>
+          <div class="api-row"><span class="api-name">BloomFilter</span><span class="api-desc">256-bit filter + per-entry fingerprint array, 4 hash functions over a mixing prime pair; version counter allows lock-free readers across cache promotions</span></div>
+          <div class="api-row"><span class="api-name">nvm_log_entry_t</span><span class="api-desc">Redo-log payload: three flavours — <code style="font-family:var(--mono);">FULL</code> (node snapshot), <code style="font-family:var(--mono);">DELTA</code> (diff), <code style="font-family:var(--mono);">INSERT</code> (single GP)</span></div>
+          <div class="api-row"><span class="api-name">HotBloomCache</span><span class="api-desc">Bounded DRAM cache (default 1.5 M slots, 64 K-entry DirChunks); write-path promotions start at ref = 1, SGP-hot promotions at ref = 3, retired with a delayed-free grace period</span></div>
+          <div class="api-row"><span class="api-name">InsertTracker</span><span class="api-desc">Reservoir-sampled equi-depth histogram; holds two generations (current + frozen previous epoch) so SGP forecasts read a stable distribution</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Compile-time configuration</div>
+        <div class="card-body" style="margin-top:4px;">Every ablation point from the paper is a single flag — flipping one does not require changes elsewhere, which is what lets the ablation study isolate each mechanism cleanly.</div>
+        <div style="margin-top:10px;">
+          <div class="api-row"><span class="api-name" style="color:var(--accent2); min-width:230px;">ENABLE_SGP</span><span class="api-desc">Turns on speculative guideposts + hotspot detector (Base+S)</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">ENABLE_IMMEDIATE_FLUSH</span><span class="api-desc">Disables group commit — every SMO CLWB+SFENCE'd synchronously (Base config)</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">ENABLE_IMMEDIATE_RECLAIM</span><span class="api-desc">Forces reclamation on every threshold breach instead of batching</span></div>
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">DIVERGENCE_THRESHOLD</span><span class="api-desc">The δ knob — floating-point; controls when the shadow index is forced back into sync</span></div>
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">SEARCH_STABILITY_COEFFICIENT_BY_LEVEL</span><span class="api-desc">Per-level σ coefficient array — tighter at the root reflecting greater cost of imbalance at higher levels</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">PERSISTENT_THRESHOLD</span><span class="api-desc">Bytes of accumulated log before a forced flush (default 256 KiB)</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">MAX_CKP_LOG_ENTRIES</span><span class="api-desc">Checkpoint redo-log ring size (default 64 MiB); bounds log-replay recovery time</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">HOT_BLOOM_MAX_CACHED</span><span class="api-desc">Size cap on the DRAM Bloom-filter cache (default 1.5 M entries)</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Dual-pool, ID-indexed layout (how remap-free recovery works)</div>
+        <div class="card-body" style="margin-top:4px;">
+          The DRAM main index and PMEM shadow index share an identical layout: both are <code style="font-family:var(--mono);">Inode</code> arrays of size <code style="font-family:var(--mono);">MAX_NODES</code>, and at construction each node is stamped with an <code style="font-family:var(--mono);">int32_t id</code> that equals its array index. Every structural reference — <code style="font-family:var(--mono);">hdr.next</code>, <code style="font-family:var(--mono);">hdr.parent_id</code>, SGP link targets — is stored as an iNode ID, not a raw pointer. Because IDs are position-independent, the shadow image can be remapped to any virtual address on restart and the same integer references resolve into the new pool without any swizzling step.
+        </div>
+        <div class="code" style="margin-top:10px;">// dramInodePool.cpp — contiguous placement-new; id == array index
+void *indexPool = DramManager::getPoolStartAddress(DRAMINDEXPOOL);
+pool_base_ = static_cast&lt;Inode*&gt;(indexPool);
+for (int i = 0; i &lt; numNodes; i++)
+    new (&amp;pool_base_[i]) Inode(/*id=*/i, /*level=*/0, /*next=*/0);
+
+// pmemInodePool.cpp — identical layout, different backing store
+pmemobj_alloc(pop, &amp;root-&gt;ptr[0], sizeof(Inode) * MAX_NODES, 0, NULL, NULL);
+void *inodePool = pmemobj_direct(root-&gt;ptr[0]);
+for (int i = 0; i &lt; numNodes; i++) {
+    Inode *inode = new (inodePool) Inode(/*id=*/i, 0, 0);
+    pmemInodePool.push_back(inode);
+    inodePool = static_cast&lt;char*&gt;(inodePool) + sizeof(Inode);
+}
+
+// node.h — all cross-references are int32_t IDs, not pointers
+class header {
+  int32_t next;        // next sibling's id in the same pool
+  int32_t id;          // == array index in the pool
+  int32_t parent_id;   // parent's id in the same pool
+  ...
+};
+
+// recoveryManager.cpp — recovery is a single memcpy; no fixup needed
+memcpyToDRAM(dramPool, pmemPool, sizeof(Inode) * last_index);
+// pool_base_[hdr.next] now resolves in DRAM exactly as it did in PMEM</div>
+        <div class="card-body" style="margin-top:8px; font-size:14.5px;">
+          <span style="color:var(--accent3); font-family:var(--mono);">Why this matters.</span> Recovery avoids the classic problem of fixing up millions of persisted pointers after remap. The only post-copy work is bumping seqlock versions that happened to be odd (mid-write) at crash time — unrelated to addressing. Log-replay follows the same convention: <code style="font-family:var(--mono);">nvm_log_entry_t</code> records target iNodes by ID, so applying a <code style="font-family:var(--mono);">FULL</code> / <code style="font-family:var(--mono);">DELTA</code> / <code style="font-family:var(--mono);">INSERT</code> entry is a bounded write into <code style="font-family:var(--mono);">pmemInodePool[entry.inode_id]</code> with no pointer chasing.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Persistence layer</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name">libpmemobj (PMDK)</span><span class="api-desc">Pool allocation and transaction primitives; pools mapped via DAX from an ext4-DAX mount so load/store bypasses the page cache</span></div>
+          <div class="api-row"><span class="api-name">ID-indexed pools</span><span class="api-desc">DRAM and PMEM iNode pools are both contiguous <code style="font-family:var(--mono);">Inode[MAX_NODES]</code> arrays; every internal reference is the destination iNode's <code style="font-family:var(--mono);">int32_t id</code>, which equals its array index — so references resolve identically in either pool without pointer swizzling</span></div>
+          <div class="api-row"><span class="api-name">redo-log entry types</span><span class="api-desc"><code style="font-family:var(--mono);">FULL</code> for new / heavily-modified nodes, <code style="font-family:var(--mono);">DELTA</code> for incremental edits, <code style="font-family:var(--mono);">INSERT</code> for single-slot insertion — picked per event to keep log volume proportional to real change</span></div>
+          <div class="api-row"><span class="api-name">Group commit</span><span class="api-desc">A background flusher batches redo entries into one CLWB+SFENCE per commit window; child-before-parent ordering is enforced so a truncated log always decodes to a reachable tree</span></div>
+          <div class="api-row"><span class="api-name">Reclaim modes</span><span class="api-desc">Compile-time switches <code style="font-family:var(--mono);">ENABLE_DT_ONLY_RECLAIM</code> / <code style="font-family:var(--mono);">ENABLE_SYNC_RECLAIM</code> let benchmarks isolate divergence-only vs. synchronous reclamation behaviour</span></div>
+          <div class="api-row"><span class="api-name">WAL high watermark</span><span class="api-desc"><code style="font-family:var(--mono);">WAL_HIGH_WATERMARK_RATIO = 0.75</code> — a checkpoint is forced when the log ring crosses this fraction, even if δ has not yet been violated</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Background threads</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name" style="color:#6eb5f5;">logFlushThread</span><span class="api-desc">Drains the in-memory redo log to PMEM in batched commits — primary off-path persistence worker</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent2);">logMergeThread</span><span class="api-desc">Merges accumulated log entries into the PMEM shadow index at checkpoint time</span></div>
+          <div class="api-row"><span class="api-name" style="color:var(--accent3);">rebalanceThread</span><span class="api-desc">Executes deferred iNode reorganisations queued by σ-violation events (<code style="font-family:var(--mono);">MAX_REBALANCE_THREADS = 1</code> by default)</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d2a8ff;">hotspot detector</span><span class="api-desc">Epoch-boundary SGP forecast + cache promotion; runs asynchronously so the write path never waits on histogram work</span></div>
+        </div>
+        <div class="card-body" style="margin-top:8px; font-size:14.5px;">All background threads use a <code style="font-family:var(--mono);">boost::lockfree::spsc_queue</code> handoff from the write path and are pinned to the NUMA node local to the PMEM region to avoid cross-socket traffic.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Concurrency &amp; performance details</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name">Lock-free traversal</span><span class="api-desc">iNode versions and Bloom-filter versions gate optimistic reads; writers take a per-iNode spinlock only for structural changes</span></div>
+          <div class="api-row"><span class="api-name">SIMD fingerprint match</span><span class="api-desc">AVX2 scan over the 63-entry vNode fingerprint array short-circuits Bloom hits before touching payload memory</span></div>
+          <div class="api-row"><span class="api-name">CLOCK + retire-grace cache</span><span class="api-desc">HotBloomCache eviction uses CAS to null out the slot, syncs the DRAM copy back to PMEM, then delays free for <code style="font-family:var(--mono);">kRetireGrace = 2000</code> generations so stale readers remain safe</span></div>
+          <div class="api-row"><span class="api-name">Cache-line alignment</span><span class="api-desc">All hot structures (Inode, HotBloomCache::DirChunk) <code style="font-family:var(--mono);">alignas(64)</code> — matches the <code style="font-family:var(--mono);">L1_CACHE_LINE_SIZE</code> constant used for flush granularity accounting</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Reproduction</div>
+        <div style="margin-top:4px;">
+          <div class="api-row"><span class="api-name">Build</span><span class="api-desc"><code style="font-family:var(--mono);">make</code> in the main directory; requires PMDK ≥ 1.9 and a DAX-capable mount (e.g. <code style="font-family:var(--mono);">/mnt/pmem0</code>)</span></div>
+          <div class="api-row"><span class="api-name">Throughput (Q1)</span><span class="api-desc"><code style="font-family:var(--mono);">run_full_bench.sh</code>, <code style="font-family:var(--mono);">run_full_bench_scan.sh</code> — YCSB Load / A–E × {uniform, Zipfian} × {1,4,8,16} threads</span></div>
+          <div class="api-row"><span class="api-name">Ablation (Q2)</span><span class="api-desc"><code style="font-family:var(--mono);">run_splitpath_stats.sh</code>, <code style="font-family:var(--mono);">run_sgp_call_stats.sh</code> — compile-time variants (SGP off / COEFF=1 / IMM_PERSIST) capturing split-path composition and SGP link rates</span></div>
+          <div class="api-row"><span class="api-name">Knob sweep (Q3)</span><span class="api-desc"><code style="font-family:var(--mono);">run_dt_sweep.sh</code> — varies <code style="font-family:var(--mono);">DIVERGENCE_THRESHOLD</code> from 1.01 to 10.0 under insert-only and YCSB-A; supplementary sweeps in <code style="font-family:var(--mono);">run_threshold.sh</code>, <code style="font-family:var(--mono);">run_rt_dt.sh</code>, <code style="font-family:var(--mono);">run_dt_only.sh</code>, <code style="font-family:var(--mono);">run_stability_coeff.sh</code></span></div>
+          <div class="api-row"><span class="api-name">Recovery (Q4)</span><span class="api-desc"><code style="font-family:var(--mono);">run_recovery_scenarios.sh</code>, <code style="font-family:var(--mono);">run_crash_recovery.sh</code> — pre-crash / post-crash / recovery latency traces and post-recovery lookup throughput</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Applicability beyond Optane</div>
+        <div class="card-body">TandemKV requires only three hardware properties: (i) byte addressability, (ii) DAX-style load/store access, and (iii) hardware-managed persistence ordering. These are also provided by CMM-H — a CXL-attached persistent memory device combining a DRAM cache with NAND-backed persistence exposed through fsdax. TandemKV's group-committed persistence is complementary to CMM-H's internal write coalescing: the two mechanisms stack, reducing both flush frequency and NAND amplification per flush. Stale-shadow recovery, which reads the shadow image sequentially instead of chasing pointers, is a particularly strong fit on devices where NAND-path latency dominates random reads.</div>
+      </div>
+
+      <div class="cta">
+        Code and reproduction scripts available at <a href="https://github.com/anon-user-KV/TandemKV" target="_blank">github.com/anon-user-KV/TandemKV</a>.
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
