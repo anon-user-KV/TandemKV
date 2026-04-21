@@ -11,7 +11,7 @@ Prototype source and reproduction scripts for the SIGMOD '27 submission.
 - g++ with C++17, `make`, `numactl`
 
 ## Build
-cd TandemKV; make
+```cd TandemKV; make -j${n_proc}```
 
 Compile-time flags (passed as `make VAR=1`): `ENABLE_SGP`, `ENABLE_COEFF_ONE`,
 `ENABLE_IMMEDIATE_FLUSH`, `ENABLE_IMMEDIATE_RECLAIM`, `ENABLE_SPLITPATH_STATS`.
