@@ -1,6 +1,9 @@
 # TandemKV
-
-**[→ Interactive documentation](https://anon-user-kv.github.io/TandemKV/)**
+<p align="center">
+  <a href="https://anon-user-kv.github.io/TandemKV/">
+    <img src="docs/badge.svg" alt="Interactive Documentation">
+  </a>
+</p>
 
 Off-critical-path index maintenance for durable DRAM–NVM key-value stores.
 Prototype source and reproduction scripts for the SIGMOD '27 submission.
