@@ -662,6 +662,33 @@ body {
           </div>
       </div>
 
+      <div class="card" style="background: rgba(180, 40, 40, 0.10); border: 1px solid rgba(180, 40, 40, 0.25);">
+        <div class="card-title" style="color:#af1919;">Variable-payload support</div>
+        <div class="card-body" style="margin-top:4px;">
+          TandemKV separates indexing from value storage: index entries store a fixed-size handle (offset), while actual values live in an append-only PMEM pool.
+This keeps the index layout constant regardless of payload size, enabling efficient support for anything from small keys to KB-scale values without changing structure or lookup paths.
+        </div>
+        <!--
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:.75rem; margin-top:10px;">
+          <div class="knob">
+            <div class="knob-title" style="color:#6eb5f5;">Indirect value log</div>
+            <div class="knob-body">Values are written to a dedicated PMEM region via a bump-pointer allocator. The vNode entry holds only an 8-byte handle; reads return a pointer directly into the pool (zero-copy). Updates for a fixed payload size rewrite bytes in-place without touching the bump pointer.</div>
+          </div>
+          <div class="knob">
+            <div class="knob-title" style="color:var(--accent2);">Alignment to XPLine granularity</div>
+            <div class="knob-body">Intel Optane DIMM uses a 256 B internal block (XPLine). Any write smaller than 256 B triggers a device-level read-modify-write over the full block — so an 8 B payload pays the same NVM write cost as a 256 B payload, with only 3 % utilization of the XPLine write budget.</div>
+          </div>
+        </div> 
+          </div>-->
+        <div class="card-body" style="margin-top:10px; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:6px; font-size:14px; line-height:1.6;">
+          <span style="color:#d29922; font-family:var(--mono); font-size:13px;">▸ XPLine granularity: why small values are inefficient</span><br>
+          <!--Measured throughput <em>improves</em> as payload grows, not shrinks. At 8 B the index does the same amount of work per operation as at 1024 B, but the NVM subsystem pays an identical 256 B XPLine write for a nearly-empty block. Effective NVM bandwidth utilization reaches its minimum at the smallest payload. This makes <strong style="font-weight:500;">8 B the stress scenario for the value layer</strong> — it maximises write-amplification relative to useful data while leaving the index critical path unchanged — and is therefore used as the default benchmark configuration to expose the worst-case overhead of the indirect-value design.-->
+          Optane writes operate at a 256 B granularity (XPLine). Any smaller update still incurs a full-block write, so an 8 B value pays the same NVM cost as a 256 B one — with minimal useful data.
+          This makes small payloads the least efficient: write amplification is highest while the index cost remains unchanged. As payload size increases, bandwidth utilization improves.<br>
+          <strong style="font-weight:500;">8 B therefore represents a stress case for the value layer</strong> and is used to expose worst-case overhead.
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-title">Beyond Optane — emerging memory solutions</div>
         <div class="card-body" style="margin-top:4px;">
@@ -1649,6 +1676,28 @@ END FUNCTION</div>
           After stale-shadow recovery, any SMOs that fell between the last checkpoint and the crash appear as occasional 10–12 µs latency spikes on sampled queries — only at large δ. Inside the recommended region (δ ≤ 1.20) the spikes are effectively invisible. Recovery itself performs <em>no</em> restructuring: the same path-stability metrics used during normal execution continue to fire under live traffic, and each touched path is repaired as soon as a subsequent write reaches it. What takes time is not convergence <em>per path</em> but retiring the full set of deferred paths, which is governed by how quickly writes cover them.
         </div>
       </div>
+
+      <!-- Q5: VARIABLE PAYLOAD -->
+      <div class="card">
+        <div class="card-title"><span style="color:#d29922;">Variable-payload characterization — index cost vs. value I/O cost</span></div>
+        <div class="card-body" style="margin-top:4px;">
+         <!-- To isolate the index layer's contribution from the cost of storing and retrieving values, we sweep payload size from 8 B to 1024 B on a 100M-key Zipfian dataset (16 threads) with the indirect value-pool enabled. The main YCSB suite uses 8 B values as a baseline; this experiment reveals what happens as--> As the value layer becomes non-trivial:
+        </div>
+        <div style="display:grid; grid-template-columns:3fr 2fr; gap:.75rem; margin-top:12px;">
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:14px; min-width:0;">
+            <div style="font-family:var(--mono); color:#d29922; font-size:13px; margin-bottom:6px;">Write behavior</div>
+            <div style="font-size:14px; color:#9ca3af; line-height:1.6;">At 8 B the NVM device pays a full 256B XPLine read-modify-write for a nearly empty block — the least efficient point. At 256B, payload and XPLine size align. Further growth just scale linearly in whole XPLine units.</div>
+          </div>
+          <div style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:14px; min-width:0;">
+            <div style="font-family:var(--mono); color:#6eb5f5; font-size:13px; margin-bottom:6px;">Read behavior</div>
+            <div style="font-size:14px; color:#9ca3af; line-height:1.6;"><!--Under Zipfian skew, hot keys are read repeatedly; larger payloads cause the NVM internal read buffer to prefetch more useful bytes per access. -->The index traversal cost — skiplist walk, Bloom check, vNode fingerprint scan — is <em>constant</em> across all payload sizes.</div>
+          </div>
+        </div>
+        <div class="card-body" style="margin-top:10px; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:6px; font-size:14px; line-height:1.6;">
+          <span style="color:#7ee787; font-family:var(--mono); font-size:13px;">▸ Key takeaway</span><br>
+          TandemKV's index path contributes a fixed number of cycles per operation, independent of payload width — the variable component is entirely in the value pool's I/O. <strong style="font-weight:500;">8 B is therefore the stress case for the value layer</strong>: maximum XPLine write amplification, minimum read-buffer utilisation. The main evaluation suite (8 B values) represents the hardest operating point for the indirect-value design.
+        </div>
+      </div>
     </div>
 
     <!-- IMPLEMENTATION -->
@@ -1697,6 +1746,7 @@ END FUNCTION</div>
           <div class="api-row"><span class="api-name" style="color:var(--accent2); min-width:230px;">ENABLE_SGP</span><span class="api-desc">Turns on speculative guideposts + hotspot detector (Base+S)</span></div>
           <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">ENABLE_IMMEDIATE_FLUSH</span><span class="api-desc">Disables group commit — every SMO CLWB+SFENCE'd synchronously (Base config)</span></div>
           <div class="api-row"><span class="api-name" style="color:var(--accent3); min-width:230px;">ENABLE_IMMEDIATE_RECLAIM</span><span class="api-desc">Forces reclamation on every threshold breach instead of batching</span></div>
+          <div class="api-row"><span class="api-name" style="color:#d29922; min-width:230px;">ENABLE_VARIABLE_PAYLOAD</span><span class="api-desc">enables variable-payload support (default off - 8B values)</span></div>
           <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">DIVERGENCE_THRESHOLD</span><span class="api-desc">The δ knob — floating-point; controls when the shadow index is forced back into sync</span></div>
           <div class="api-row"><span class="api-name" style="color:#6eb5f5; min-width:230px;">SEARCH_STABILITY_COEFFICIENT_BY_LEVEL</span><span class="api-desc">Per-level σ coefficient array — tighter at the root reflecting greater cost of imbalance at higher levels</span></div>
           <div class="api-row"><span class="api-name" style="color:#d2a8ff; min-width:230px;">PERSISTENT_THRESHOLD</span><span class="api-desc">Bytes of accumulated log before a forced flush (default 256 KiB)</span></div>
@@ -1742,6 +1792,24 @@ memcpyToDRAM(dramPool, pmemPool, sizeof(Inode) * last_index);
       </div>
 
       <div class="card">
+        <div class="card-title">Variable-payload value store <span style="font-family:var(--mono); font-size:13px; color:var(--muted); font-weight:400; margin-left:8px;">ENABLE_VARIABLE_PAYLOAD=1</span></div>
+        <div class="card-body" style="margin-top:4px;">Each vNode entry stores an 8-byte pool offset (handle) rather than an inline value. Actual bytes live in a dedicated append-only PMEM region (<code style="font-family:var(--mono);">pmemValuePool</code>) so vNode layout — and all AVX2 fingerprint paths — are unchanged regardless of value size.</div>
+        <!--<div style="margin-top:10px;">
+          <div class="api-row"><span class="api-name">VarPayloadHeader</span><span class="api-desc"><code style="font-family:var(--mono);">{ uint32_t len; uint32_t reserved; }</code> — each record is header + payload rounded up to 8 B for alignment; <code style="font-family:var(--mono);">reserved</code> carries a valid/tombstone bit for GC</span></div>
+          <div class="api-row"><span class="api-name">PmemValuePool</span><span class="api-desc">Bump-pointer allocator on PMEM pool slot 5 (10 GB default); single <code style="font-family:var(--mono);">std::atomic&lt;uint64_t&gt;</code> offset; handle = pool-relative byte offset stored in the existing <code style="font-family:var(--mono);">Val_t</code> vNode field; offset 0 reserved as null sentinel</span></div>
+          <div class="api-row"><span class="api-name">Insert path</span><span class="api-desc"><code style="font-family:var(--mono);">fetch_add(record_bytes)</code> → memcpy header + payload → CLWB+SFENCE → returns handle to index</span></div>
+          <div class="api-row"><span class="api-name">Read path</span><span class="api-desc">Pointer arithmetic into the PMEM region — zero-copy by default; caller receives a pointer directly into the pool. Set <code style="font-family:var(--mono);">TANDEMKV_READ_COPY=1</code> to memcpy into a thread-local buffer for A/B comparison with systems that return owned bytes (e.g. FluidKV)</span></div>
+          <div class="api-row"><span class="api-name">Update path (fixed-size)</span><span class="api-desc"><code style="font-family:var(--mono);">lookup()</code> → <code style="font-family:var(--mono);">updateInPlace()</code> — overwrites bytes within the existing slot; no bump-pointer touch; handle in the index is unchanged. Falls back to allocate-new if payload grew beyond slot (rare in fixed-size workloads)</span></div>
+        </div>-->
+        <div style="margin-top:12px; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:6px;">
+          <div style="font-family:var(--mono); color:#d29922; font-size:13px; margin-bottom:8px;">Runtime flags (set as env vars before invoking benchmark)</div>
+          <div class="api-row" style="border-color:#21262d;"><span class="api-name" style="color:#79c0ff; min-width:200px;">TANDEMKV_PAYLOAD_SIZE</span><span class="api-desc">Value width for this run; all inserts use a payload of exactly this many bytes (default 8).</span></div>
+          <div class="api-row" style="border-color:#21262d;"><span class="api-name" style="color:#79c0ff; min-width:200px;">TANDEMKV_READ_COPY</span><span class="api-desc">If 1, memcpy each returned payload into a thread-local buffer on every read — isolates value-copy cost for comparison with systems that do not return zero-copy pointers (default 0)</span></div>
+          <div class="api-row" style="border-color:#21262d;"><span class="api-name" style="color:#79c0ff; min-width:202px;">TANDEMKV_VALPOOL_BYTES</span><span class="api-desc">Override the value-pool size. <code style="font-family:var(--mono);">run_payload_bench.sh</code> computes and exports this automatically.</span></div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Persistence layer</div>
         <div style="margin-top:4px;">
           <div class="api-row"><span class="api-name">libpmemobj (PMDK)</span><span class="api-desc">Pool allocation and transaction primitives; pools mapped via DAX from an ext4-DAX mount so load/store bypasses the page cache</span></div>
@@ -1779,10 +1847,11 @@ memcpyToDRAM(dramPool, pmemPool, sizeof(Inode) * last_index);
         <div style="margin-top:4px;">
           <div class="api-row"><span class="api-name">Build</span><span class="api-desc"><code style="font-family:var(--mono);">make</code> in the main directory; requires PMDK ≥ 1.9 and a DAX-capable mount (e.g. <code style="font-family:var(--mono);">/mnt/pmem0</code>)</span></div>
           <div class="api-row"><span class="api-name">Workloads</span><span class="api-desc">Build the bundled <code style="font-family:var(--mono);">ycsb_generator/</code> and run <code style="font-family:var(--mono);">./generator.sh</code> to emit <code style="font-family:var(--mono);">load.trace</code> and <code style="font-family:var(--mono);">txns{a..f}_{zipf,unif}.trace</code>; edit <code style="font-family:var(--mono);">ITEM_NUM</code> for the desired dataset size (50M for paper scale). Export <code style="font-family:var(--mono);">TANDEMKV_WORKLOAD_DIR</code> to that directory before invoking <code style="font-family:var(--mono);">project</code> or any reproduction script.</span></div>
-          <div class="api-row"><span class="api-name">Throughput (Q1)</span><span class="api-desc"><code style="font-family:var(--mono);">run_full_bench.sh</code>, <code style="font-family:var(--mono);">run_full_bench_scan.sh</code> — YCSB Load / A–E × {uniform, Zipfian} × {1,4,8,16} threads</span></div>
+          <div class="api-row"><span class="api-name">Throughput (Q1)</span><span class="api-desc"><code style="font-family:var(--mono);">run_full_bench.sh</code>, <code style="font-family:var(--mono);">run_full_bench_scan.sh</code> — YCSB Load / A–E × {uniform, Zipfian} × {1,4,8,16,32} threads</span></div>
           <div class="api-row"><span class="api-name">Ablation (Q2)</span><span class="api-desc"><code style="font-family:var(--mono);">run_splitpath_stats.sh</code>, <code style="font-family:var(--mono);">run_sgp_call_stats.sh</code> — compile-time variants (SGP off / COEFF=1 / IMM_PERSIST) capturing split-path composition and SGP link rates</span></div>
           <div class="api-row"><span class="api-name">Knob sweep (Q3)</span><span class="api-desc"><code style="font-family:var(--mono);">run_dt_sweep.sh</code> — varies <code style="font-family:var(--mono);">DIVERGENCE_THRESHOLD</code> from 1.01 to 10.0 under insert-only and YCSB-A; supplementary sweeps in <code style="font-family:var(--mono);">run_threshold.sh</code>, <code style="font-family:var(--mono);">run_rt_dt.sh</code>, <code style="font-family:var(--mono);">run_dt_only.sh</code>, <code style="font-family:var(--mono);">run_stability_coeff.sh</code></span></div>
           <div class="api-row"><span class="api-name">Recovery (Q4)</span><span class="api-desc"><code style="font-family:var(--mono);">run_recovery_scenarios.sh</code>, <code style="font-family:var(--mono);">run_crash_recovery.sh</code> — pre-crash / post-crash / recovery latency traces and post-recovery lookup throughput</span></div>
+          <div class="api-row"><span class="api-name">Variable payload</span><span class="api-desc"><code style="font-family:var(--mono);">run_payload_bench.sh</code> — sweeps <code style="font-family:var(--mono);">payload_size ∈ {8,128,256,512,1024}</code>.</div>
         </div>
       </div>
 
