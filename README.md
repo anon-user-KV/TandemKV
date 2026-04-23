@@ -16,7 +16,7 @@ Prototype source and reproduction scripts for the SIGMOD '27 submission.
 ## Build
 ```cd TandemKV; make -j${n_proc}```
 
-Compile-time flags (passed as `make VAR=1`): `ENABLE_SGP`, `ENABLE_COEFF_ONE`, `ENABLE_IMMEDIATE_FLUSH`, `ENABLE_IMMEDIATE_RECLAIM`, `ENABLE_SPLITPATH_STATS`.
+Compile-time flags (passed as `make VAR=1`): `ENABLE_SGP`, `ENABLE_COEFF_ONE`, `ENABLE_IMMEDIATE_FLUSH`, `ENABLE_IMMEDIATE_RECLAIM`, `ENABLE_SPLITPATH_STATS`, `ENABLE_VARIABLE_PAYLOAD`.
 
 ## Generate YCSB traces
 The binary reads pre-generated YCSB trace files from the directory pointed to by the `TANDEMKV_WORKLOAD_DIR` environment variable. The generator is bundled in `ycsb_generator/`.
@@ -42,6 +42,13 @@ Expected contents of `$TANDEMKV_WORKLOAD_DIR`: `load.trace`, `txns{a,b,c,d,e,f}_
 
 ```./project <workload>  <dist>  <threads> <pmem_dir> [--insert-only]```
 
+### Variable-payload value store `ENABLE_VARIABLE_PAYLOAD=1`
+Runtime flags (set as env vars before invoking benchmark)
+| Flag | Role |
+|---------------|---|
+| TANDEMKV_PAYLOAD_SIZE | Value width for this run; all inserts use a payload of exactly this many bytes (default 8). |
+| TANDEMKV_READ_COPY  | If 1, memcpy each returned payload into a thread-local buffer on every read — isolates value-copy cost for comparison with systems that do not return zero-copy pointers (default 0) |
+| TANDEMKV_VALPOOL_BYTES | Override the value-pool size. `run_payload_bench.sh` computes and exports this automatically. |
 
 ## Reproduce paper results
 | Paper question | Scripts |
@@ -50,6 +57,7 @@ Expected contents of `$TANDEMKV_WORKLOAD_DIR`: `load.trace`, `txns{a,b,c,d,e,f}_
 | Q2 Ablation   | `run_splitpath_stats.sh`, `run_sgp_call_stats.sh` |
 | Q3 Knob sweep | `run_dt_sweep.sh`, `run_threshold.sh`, `run_rt_dt.sh`, `run_dt_only.sh`, `run_stability_coeff.sh` |
 | Q4 Recovery   | `run_recovery_scenarios.sh`, `run_crash_recovery.sh` |
+| variable_payload   | `run_payload_bench.sh` |
 
 All reproduction scripts expect `TANDEMKV_WORKLOAD_DIR` to be set and a
 writable DAX mount at `/mnt/pmem*`.
