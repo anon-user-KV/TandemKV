@@ -1,0 +1,60 @@
+#include <cstdint>
+#include <cassert>
+#pragma once
+//typedef int32_t Key_t; // 8 bytes
+//typedef int32_t Val_t; // 8 bytes
+
+typedef uint64_t Key_t; // 8 bytes
+typedef uint64_t Val_t; // 8 bytes
+
+const int MAX_LEVEL = 20;
+
+#if ENABLE_COEFF_ONE
+const int SEARCH_STABILITY_COEFFICIENT_BY_LEVEL[MAX_LEVEL] = {
+    3, 3,
+    1, 0, 0,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0
+};
+#else
+const int SEARCH_STABILITY_COEFFICIENT_BY_LEVEL[MAX_LEVEL] = {
+    3, 3,
+    1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1
+};
+#endif
+
+#define WORKERQUEUE_NUM 1
+#define L1_CACHE_LINE_SIZE 64
+#define L1_CACHE_LINE_MASK (~(L1_CACHE_LINE_SIZE - 1))
+#ifndef RECLAIM_THRESHOLD
+#define RECLAIM_THRESHOLD 1024
+#endif
+#define RECLAIM_RETRY_THRESHOLD 500000000
+#ifndef PERSISTENT_THRESHOLD
+#define PERSISTENT_THRESHOLD 1024
+#endif
+#ifndef DIVERGENCE_THRESHOLD
+#define DIVERGENCE_THRESHOLD 1.05
+#endif
+#ifndef ENABLE_DT_ONLY_RECLAIM
+#define ENABLE_DT_ONLY_RECLAIM 0
+#endif
+#ifndef WAL_HIGH_WATERMARK_RATIO
+#define WAL_HIGH_WATERMARK_RATIO 0.75
+#endif
+#define MAX_NODES 600000
+#define MAX_VALUE_NODES 15000000
+#define MAX_REBALANCE_THREADS 1
+
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
+
+
+//#define DBG 1
+//#define LOG_DEBUG 1
